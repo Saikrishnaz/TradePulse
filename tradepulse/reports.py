@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from .config import now_ist, today_ist
 from .notify.format import broker_name, h, hhmmss, inr, num
-from .localdata import mask_account
+from .notify.format import show_id
 from .service import DataService, Scope
 
 
 def _acct_line(a: dict) -> str:
-    return f"<b>{h(a.get('client_name') or '-')}</b> · {h(broker_name(a.get('broker')))} <code>{h(mask_account(a['account_id']))}</code>"
+    return f"<b>{h(a.get('client_name') or '-')}</b> · {h(broker_name(a.get('broker')))} <code>{h(show_id(a['account_id']))}</code>"
 
 
 def status_text(svc: DataService, scope: Scope) -> str:
@@ -85,7 +85,7 @@ def holdings_text(svc: DataService, scope: Scope, account_ids: list[str] | None 
             extra.append(f"today {'+' if r['change'] > 0 else ''}{r['change']}")
         lines.append(f"<b>{h(r['symbol'])}</b> {r['quantity']} @ {num(r['average_price'])} · LTP {num(r.get('ltp'))}"
                      f" · P&L {inr(r['pnl']) if r.get('pnl') is not None else 'n/a'}" + (f" · {', '.join(extra)}" if extra else ""))
-        lines.append(f"  {h(r.get('client_name'))} · {h(broker_name(r.get('broker')))} <code>{h(mask_account(r['account_id']))}</code>")
+        lines.append(f"  {h(r.get('client_name'))} · {h(broker_name(r.get('broker')))} <code>{h(show_id(r['account_id']))}</code>")
     if len(rows) > 40:
         lines.append(f"… and {len(rows) - 40} more")
     lines.append(_baseline_note(svc, ids, "holdings"))
@@ -103,7 +103,7 @@ def positions_text(svc: DataService, scope: Scope, account_ids: list[str] | None
         lines.append(f"<b>{h(p['symbol'])}</b> {h(p['product'])} {h(p['direction'])} {p['open_quantity']} @ {num(p['average_entry_price'])}"
                      f" · LTP {num(p.get('ltp'))} · P&L {inr(u) if u is not None else 'n/a'}")
         lines.append(f"  {h(p.get('client_name'))} · {h(broker_name(p.get('broker')))} "
-                     f"<code>{h(mask_account(p['account_id']))}</code>" + (f" · {h(p.get('trading_mode'))}" if p.get("trading_mode") else ""))
+                     f"<code>{h(show_id(p['account_id']))}</code>" + (f" · {h(p.get('trading_mode'))}" if p.get("trading_mode") else ""))
     if len(pos) > 40:
         lines.append(f"… and {len(pos) - 40} more")
     lines.append(_baseline_note(svc, ids, "positions"))
@@ -120,7 +120,7 @@ def orders_text(svc: DataService, scope: Scope, account_ids: list[str] | None = 
     for o in rows:
         lines.append(f"{h(o['created_at'][11:19])} <b>{h(o['side'])}</b> {h(o['symbol'])} "
                      f"{o['filled_quantity']}/{o['ordered_quantity']} · <b>{h(o['status'])}</b>"
-                     f" · {h(o['client_name'])} <code>{h(mask_account(o['account_id']))}</code>")
+                     f" · {h(o['client_name'])} <code>{h(show_id(o['account_id']))}</code>")
         if o["status"] in ("REJECTED", "FAILED") and o.get("status_message"):
             lines.append(f"  ↳ {h(o['status_message'][:120])}")
     return "\n".join(lines)
@@ -131,7 +131,7 @@ def order_text(svc: DataService, scope: Scope, ref: str) -> str:
     if not o:
         return f"No order <code>{h(ref)}</code> found in your accounts."
     lines = [f"🧾 <b>Order {h(o['broker_order_id'] or o['internal_order_id'])}</b>", "",
-             f"{h(o['client_name'])} · {h(broker_name(o['broker']))} <code>{h(mask_account(o['account_id']))}</code>",
+             f"{h(o['client_name'])} · {h(broker_name(o['broker']))} <code>{h(show_id(o['account_id']))}</code>",
              f"<b>{h(o['side'])}</b> {h(o['symbol'])} ({h(o['exchange'])}) · {h(o['order_type'])} {h(o['product'])}",
              f"Qty {o['filled_quantity']}/{o['ordered_quantity']} · price {num(o['price'])} · avg {num(o['average_price'])}",
              f"Status: <b>{h(o['status'])}</b>"]
@@ -154,7 +154,7 @@ def trades_text(svc: DataService, scope: Scope, account_ids: list[str] | None = 
     lines = [f"💹 <b>Trades today</b> ({len(rows)})", ""]
     for f in rows:
         lines.append(f"{h(f['filled_at'][11:19])} <b>{h(f['side'])}</b> {h(f['symbol'])} {f['quantity']} @ "
-                     f"{f['price']:,.2f} · {h(f['client_name'])} <code>{h(mask_account(f['account_id']))}</code>")
+                     f"{f['price']:,.2f} · {h(f['client_name'])} <code>{h(show_id(f['account_id']))}</code>")
     return "\n".join(lines)
 
 
@@ -182,7 +182,7 @@ def pnl_text(svc: DataService, scope: Scope, period: str = "today", account_ids:
     if len(perf["accounts"]) > 1:
         lines.append("")
         for r in sorted(perf["accounts"], key=lambda r: r["net"], reverse=True):
-            lines.append(f"{h(r['client_name'])} <code>{h(r['masked_account'])}</code>: <b>{inr(r['net'])}</b>"
+            lines.append(f"{h(r['client_name'])} <code>{h(r['account_id'])}</code>: <b>{inr(r['net'])}</b>"
                          f" · orders {r['orders']['total']}")
     return "\n".join(lines)
 

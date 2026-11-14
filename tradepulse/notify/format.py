@@ -7,7 +7,6 @@ from html import escape
 
 from ..events import (ACCOUNT_ALERT, EVENT_LABELS, ORDER_FILLED, ORDER_REJECTED, POSITION_UPDATED,
                       TRADE_EXECUTED)
-from ..localdata import mask_account
 
 MAX_TEXT = 3900
 BROKERS = {"zerodha": "Zerodha", "angel": "Angel One", "5paisa": "5paisa", "fivepaisa": "5paisa", "paper": "Paper"}
@@ -16,6 +15,11 @@ ICON = {"ORDER_PLACED": "🆕", "ORDER_OPEN": "📬", "ORDER_MODIFIED": "✏️"
         "ORDER_FILLED": "✅", "TRADE_EXECUTED": "💹", "ORDER_CANCELLED": "🚫", "ORDER_REJECTED": "❌",
         "ORDER_UNKNOWN": "⚠️", "POSITION_UPDATED": "📊", "HOLDING_UPDATED": "🏦", "RECONCILE_MISMATCH": "⚠️",
         "ACCOUNT_ALERT": "🚨"}
+
+
+def show_id(account_id) -> str:
+    """Telegram shows the full client id so readers know exactly which account it is."""
+    return str(account_id or "")
 
 
 def h(v) -> str:
@@ -115,7 +119,7 @@ def event_text(e: dict) -> str:
     head = f"{ICON.get(et, '•')} <b>{h(title)}</b> · {h(broker_name(e.get('broker')))}"
     if mode and mode != "LIVE":
         head += f" · 🧪 {h(mode)}"
-    lines = [head, f"<b>{h(e.get('client_name') or '–')}</b>  <code>{h(mask_account(e.get('account_id')))}</code>", ""]
+    lines = [head, f"<b>{h(e.get('client_name') or '–')}</b>  <code>{h(show_id(e.get('account_id')))}</code>", ""]
     sym = h(pretty_symbol(e.get("symbol")))
     if et == ACCOUNT_ALERT:
         lines.append(f"🚨 <b>{h(p.get('kind') or 'Alert')}</b>" + (f" · {sym}" if e.get("symbol") else ""))

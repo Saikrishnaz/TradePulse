@@ -14,7 +14,7 @@ from __future__ import annotations
 
 
 from .config import now_ist, today_ist
-from .localdata import mask_account
+from .notify.format import show_id
 from .notify.format import broker_name, h, num, pretty_symbol  # noqa: F401 (re-exported)
 from .service import Scope
 
@@ -58,7 +58,7 @@ def stamp() -> str:
 
 
 def acct_label(a: dict) -> str:
-    return f"{(a.get('client_name') or '').split(' ')[0] or a['account_id']} {mask_account(a['account_id'])}"
+    return f"{(a.get('client_name') or '').split(' ')[0] or a['account_id']} {show_id(a['account_id'])}"
 
 
 # --- buttons ------------------------------------------------------------------------------------------
@@ -97,7 +97,7 @@ def account_row(view: str, acct: str | None, scope: Scope, svc, arg: str | None 
     label = "👤 All accounts ▾"
     if acct:
         a = svc.oms.account(acct)
-        label = f"👤 {acct_label(a) if a else mask_account(acct)} ▾"
+        label = f"👤 {acct_label(a) if a else show_id(acct)} ▾"
     return [btn(label, "acc", acct or "-", f"{view}.{arg or ''}")]
 
 
@@ -117,7 +117,7 @@ def pager(view: str, acct: str | None, arg: str | None, page: int, total: int) -
 def scope_label(svc, scope: Scope, acct: str | None) -> str:
     if acct:
         a = svc.oms.account(acct)
-        return h(f"{a['client_name']} · {broker_name(a['broker'])} {mask_account(acct)}") if a else h(mask_account(acct))
+        return h(f"{a['client_name']} · {broker_name(a['broker'])} {show_id(acct)}") if a else h(show_id(acct))
     n = len(scope.account_ids)
     return f"All accounts ({n})" if n != 1 else h(scope.label)
 
@@ -202,7 +202,7 @@ def group_home(svc, scope: Scope, page=0, **_) -> tuple[str, dict]:
         if c["rejected"] + c["failed"]:
             bits.append(f"❌ {c['rejected'] + c['failed']}")
         lines += [f"{session_dot(r)} <b>{h(r['client_name'] or r['account_id'])}</b> · {h(broker_name(r['broker']))} "
-                  f"<code>{h(r['masked_account'])}</code>",
+                  f"<code>{h(r['account_id'])}</code>",
                   "      " + " · ".join(bits)]
     if len(rows) > len(shown):
         lines.append(f"<i>+ {len(rows) - len(shown)} more account(s) — tap 👤 All accounts</i>")
@@ -265,7 +265,7 @@ def account_card(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
     r = snap["rows"][0]
     c = r["orders"]
     lines = [f"👤 <b>{h(r['client_name'] or acct)}</b>",
-             f"{h(broker_name(r['broker']))} <code>{h(r['masked_account'])}</code> · {session_dot(r)} session "
+             f"{h(broker_name(r['broker']))} <code>{h(r['account_id'])}</code> · {session_dot(r)} session "
              f"{h(r['session_status'])} · worker {h(r['worker_status'] or '–')}",
              f"<i>{h(modes_label(scope)) + ' · ' if scope.modes is not None else ''}{stamp()}</i>", ""]
     if r["net"] is None:
@@ -376,7 +376,7 @@ def order_detail(svc, scope: Scope, acct=None, arg=None, **_) -> tuple[str, dict
         return "🔍 <b>Order not found</b>\n<i>It is not in the accounts this chat can see.</i>", kb(back)
     icon = STATUS_ICON.get(o["status"], "•")
     lines = [f"{icon} <b>{h(o['status'].replace('_', ' ').title())}</b> · {h(broker_name(o['broker']))}",
-             f"<b>{h(o['client_name'])}</b>  <code>{h(mask_account(o['account_id']))}</code>", "",
+             f"<b>{h(o['client_name'])}</b>  <code>{h(show_id(o['account_id']))}</code>", "",
              f"{side_badge(o['side'], o['ordered_quantity'])} × <b>{h(pretty_symbol(o['symbol']))}</b>",
              f"{h(o['exchange'])} · {h(o['order_type'])} · {h(o['product'])} · limit {num(o['price'])}",
              f"Filled <b>{o['filled_quantity']}/{o['ordered_quantity']}</b>" + (f" @ <b>{num(o['average_price'])}</b>" if o["average_price"] else "")]
@@ -429,7 +429,7 @@ def status(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
     lines = [f"📡 <b>Account status</b> · {scope_label(svc, scope, acct)}", f"<i>{stamp()}</i>", ""]
     for a in accts[page * PAGE:(page + 1) * PAGE]:
         ok = a["session_status"] == "OK"
-        lines += [f"{'🟢' if ok else '🔴'} <b>{h(a['client_name'])}</b> · {h(broker_name(a['broker']))} <code>{h(a['masked_account'])}</code>",
+        lines += [f"{'🟢' if ok else '🔴'} <b>{h(a['client_name'])}</b> · {h(broker_name(a['broker']))} <code>{h(a['account_id'])}</code>",
                   f"   session {h(a['session_status'])} · worker {h(a['worker_status'] or '–')} · "
                   f"{'monitored' if a['monitored'] else 'not monitored'}", ""]
     cards = [btn(f"👤 {acct_label(a)}", "ac", a["account_id"]) for a in accts[page * PAGE:(page + 1) * PAGE]]

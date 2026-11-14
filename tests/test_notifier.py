@@ -10,7 +10,7 @@ def statuses(rt):
     return [r["status"] for r in rt.store.rows("SELECT status FROM notifications ORDER BY id")]
 
 
-def test_event_notification_is_sent_with_masked_account(rt, tg):
+def test_event_notification_is_sent_with_client_id(rt, tg):
     start_live(rt)
     setup_group(rt, ["J252505"], chat_id="-1001")
     rt.sim.order("J252505", outcome="reject")
@@ -18,8 +18,8 @@ def test_event_notification_is_sent_with_masked_account(rt, tg):
     assert rt.notifier.run_once() == 2
     assert statuses(rt) == ["SENT", "SENT"]
     txt = tg.sent[-1]["text"]
-    assert "Order rejected" in txt and "Jayesh Mehta" in txt and "****2505" in txt and "<blockquote>" in txt
-    assert "J252505" not in txt                       # full account id never leaves
+    assert "Order rejected" in txt and "Jayesh Mehta" in txt and "J252505" in txt and "<blockquote>" in txt
+    assert "****" not in txt                          # the full client id is shown so readers know which account
     assert tg.sent[-1]["chat_id"] == "-1001"
 
 
