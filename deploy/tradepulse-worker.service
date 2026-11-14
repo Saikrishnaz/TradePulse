@@ -1,0 +1,22 @@
+[Unit]
+Description=TradePulse workers (Redis tail, processor, reconciler, notifier, scheduler, Telegram bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradepulse
+WorkingDirectory=/opt/tradepulse
+EnvironmentFile=/opt/tradepulse/.env
+# Run exactly ONE primary (this unit). Extra capacity: a second unit with `--replica`
+# (the broker slot is global in Redis, so even several reconcilers never exceed 1 request / 3 s).
+ExecStart=/opt/tradepulse/venv/bin/python -m tradepulse.worker
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tradepulse/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

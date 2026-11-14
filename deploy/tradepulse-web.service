@@ -1,0 +1,23 @@
+[Unit]
+Description=TradePulse dashboard + API (Redis-only OMS monitor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradepulse
+WorkingDirectory=/opt/tradepulse
+EnvironmentFile=/opt/tradepulse/.env
+# Workers run in tradepulse-worker.service; this process serves the UI/API/SSE/webhooks only.
+Environment=TP_RUN_WORKERS=0
+ExecStart=/opt/tradepulse/venv/bin/python -m tradepulse.app
+Restart=always
+RestartSec=3
+# Hardening: TradePulse writes only its own data dir. It needs NO access to the OMS host or files.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tradepulse/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
