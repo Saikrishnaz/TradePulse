@@ -171,9 +171,10 @@ class Bot:
     def _message(self, msg: dict) -> None:
         chat = msg.get("chat") or {}
         frm = msg.get("from") or {}
-        if msg.get("migrate_to_chat_id"):
-            self.store.execute("UPDATE channels SET chat_id = ? WHERE kind = 'telegram' AND chat_id = ?",
-                               (str(msg["migrate_to_chat_id"]), str(chat["id"])))
+        if msg.get("migrate_to_chat_id") or msg.get("migrate_from_chat_id"):
+            old, new = ((chat["id"], msg["migrate_to_chat_id"]) if msg.get("migrate_to_chat_id")
+                        else (msg["migrate_from_chat_id"], chat["id"]))
+            self.store.migrate_channel("telegram", str(old), str(new))
             return
         text = (msg.get("text") or "").strip()
         if not text or frm.get("is_bot"):

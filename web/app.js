@@ -10,6 +10,8 @@ const state = { me: null, meta: null, route: "", live: "idle", es: null, cleanup
 const ICONS = {
   dashboard: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
   activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 8 10 8a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 0 1-4.2-4.2"/><path d="m2 2 20 20"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   layers: '<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
   trending: '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
@@ -222,7 +224,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function renderLogin(err = "") {
   stopLive();
   $("#app").innerHTML = `<div class="login-wrap"><div class="card login">
-    <div class="brand" style="padding:0"><div class="brand-mark">${icon("activity", 18)}</div><div><div class="brand-name">TradePulse</div><div class="brand-sub">SkyMatrix OMS monitoring</div></div></div>
+    <img class="login-logo" src="/static/logo.png" alt="TradePulse" width="245" height="170">
     <h1>Sign in</h1><p class="muted" style="margin:0">Use your TradePulse login (same username and password as the OMS).</p>
     <form id="loginForm" novalidate>
       <div class="field"><label for="u">Username</label><input class="input" id="u" name="username" autocomplete="username" required></div>
@@ -257,7 +259,7 @@ const TITLES = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([k, l]) 
 function renderShell() {
   $("#app").innerHTML = `<div class="shell" id="shell">
     <aside class="sidebar" aria-label="Main navigation">
-      <div class="brand"><div class="brand-mark">${icon("activity", 18)}</div><div><div class="brand-name">TradePulse</div><div class="brand-sub">OMS monitor</div></div></div>
+      <div class="brand"><img class="brand-mark" src="/static/logo-mark.png" alt="" width="30" height="30"><div><div class="brand-name">TradePulse</div><div class="brand-sub">OMS monitor</div></div></div>
       <nav class="nav">${NAV.map(([sec, items]) => `<div class="nav-label">${sec}</div>${items.filter(([k]) => k !== "users" || isAdmin()).map(([k, l, ic]) =>
         `<a href="#/${k}" data-route="${k}">${icon(ic)}<span>${l}</span>${k === "notifications" ? '<span class="badge down" id="deadBadge" hidden></span>' : ""}</a>`).join("")}`).join("")}</nav>
       <div class="sidebar-foot"><div><b class="text-2">${esc(state.me.name)}</b> · ${esc(state.me.role)}</div><div>Read-only monitor · v${esc(state.meta?.version || "")}</div></div>
@@ -1078,7 +1080,7 @@ PAGES.telegram = async (root) => {
     });
     $$("[data-act]", root).forEach((b) => b.addEventListener("click", async () => { await busy(b, () => api("PUT", `/api/telegram/chats/${b.dataset.act}`, { status: "ACTIVE", enabled: true })); toast("Chat activated", "ok"); load(); }));
     $$("[data-test]", root).forEach((b) => b.addEventListener("click", async () => { await busy(b, () => api("POST", "/api/notifications/test", { channel_id: +b.dataset.test })); toast("Test message queued", "ok"); }));
-    $$("[data-rm]", root).forEach((b) => b.addEventListener("click", async () => { if (await confirmDialog("Remove chat", "Stop sending to this chat and detach it from all groups? Pending messages to it are dropped.", "Remove chat", true)) { await api("DELETE", `/api/telegram/chats/${b.dataset.rm}`); toast("Chat removed", "ok"); load(); } }));
+    $$("[data-rm]", root).forEach((b) => b.addEventListener("click", async () => { if (await confirmDialog("Remove chat", "Remove this chat from TradePulse? It is detached from all groups and pending messages to it are dropped. If the bot is still a member of that Telegram group it will reappear here as Pending when someone writes there; remove the bot from the group in Telegram to stop that.", "Remove chat", true)) { await api("DELETE", `/api/telegram/chats/${b.dataset.rm}`); toast("Chat removed", "ok"); load(); } }));
     $$("[data-unlink]", root).forEach((b) => b.addEventListener("click", async () => { if (await confirmDialog("Unlink user", "This Telegram user will no longer see any account data in private chat.", "Unlink", true)) { await api("DELETE", `/api/telegram/users/${b.dataset.unlink}`); load(); } }));
     $$("[data-cgroups]", root).forEach((b) => b.addEventListener("click", () => {
       const c = t.chats.find((x) => x.id == b.dataset.cgroups);
@@ -1241,5 +1243,36 @@ PAGES.system = async (root) => {
     $$("#setForm input", root).forEach((i) => (i.disabled = true));
   }
 };
+
+/* ============================== show / hide password ============================== */
+// Every password field (login, users, bot token, webhook secrets) gets an eye button whenever it is rendered.
+function enhancePasswords(root = document) {
+  for (const inp of $$('input[type="password"]:not([data-pw])', root)) {
+    inp.dataset.pw = "1";
+    const wrap = document.createElement("span");
+    wrap.className = "pw-wrap";
+    if (inp.style.flex) { wrap.style.flex = inp.style.flex; inp.style.flex = ""; }
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pw-toggle";
+    b.setAttribute("aria-label", "Show password");
+    b.setAttribute("aria-pressed", "false");
+    b.title = "Show";
+    b.innerHTML = icon("eye", 16);
+    b.addEventListener("click", () => {
+      const show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+      b.innerHTML = icon(show ? "eyeOff" : "eye", 16);
+      b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      b.setAttribute("aria-pressed", String(show));
+      b.title = show ? "Hide" : "Show";
+      inp.focus();
+    });
+    wrap.appendChild(b);
+  }
+}
+new MutationObserver(() => enhancePasswords()).observe(document.body, { childList: true, subtree: true });
 
 boot();

@@ -584,6 +584,31 @@ class Store:
                 c.execute("UPDATE channels SET status = ? WHERE kind = ? AND chat_id = ?", (status, kind, str(chat_id)))
         return self.channel_by_chat(kind, chat_id)
 
+    def migrate_channel(self, kind: str, old_chat_id: str, new_chat_id: str) -> None:
+        """Telegram upgraded a group to a supergroup (new chat id). Keep ONE row: if the new id is already
+        known (the bot saw it first), move the old row's settings and group links onto it and drop the old row."""
+        with self.tx() as c:
+            old = c.execute("SELECT * FROM channels WHERE kind = ? AND chat_id = ?", (kind, old_chat_id)).fetchone()
+            if not old:
+                return
+            new = c.execute("SELECT * FROM channels WHERE kind = ? AND chat_id = ?", (kind, new_chat_id)).fetchone()
+            if not new:
+                c.execute("UPDATE channels SET chat_id = ?, chat_type = 'supergroup' WHERE id = ?", (new_chat_id, old["id"]))
+                return
+            if old["status"] == "ACTIVE" and new["status"] != "ACTIVE":
+                c.execute("UPDATE channels SET status = 'ACTIVE', enabled = ? WHERE id = ?", (old["enabled"], new["id"]))
+            c.execute("INSERT OR IGNORE INTO group_channels (group_id, channel_id) SELECT group_id, ? FROM group_channels "
+                      "WHERE channel_id = ?", (new["id"], old["id"]))
+            c.execute("UPDATE notifications SET channel_id = ? WHERE channel_id = ? AND status IN ('QUEUED','FAILED')",
+                      (new["id"], old["id"]))
+            c.execute("DELETE FROM channels WHERE id = ?", (old["id"],))
+
+    def delete_channel(self, channel_id: int) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM notifications WHERE channel_id = ? AND status IN ('QUEUED','FAILED','DEAD')", (channel_id,))
+            c.execute("DELETE FROM group_channels WHERE channel_id = ?", (channel_id,))
+            c.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+
     def groups_for_account(self, account_id: str) -> list[dict]:
         return [g for g in self.groups() if account_id in g["account_ids"]]
 

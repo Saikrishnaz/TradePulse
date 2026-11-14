@@ -143,3 +143,22 @@ def test_disabled_oms_user_loses_bot_access(rt, tg):
     rt.store.execute("UPDATE users SET status = 'DISABLED' WHERE username = 'mathew'")
     msg(rt.bot, MATHEW_TG, PRIVATE(MATHEW_TG), "/status")
     assert "isn't linked" in tg.texts()[-1]
+
+
+def test_supergroup_upgrade_leaves_one_chat_with_its_groups(rt, tg):
+    """Production: the old basic-group id and the new supergroup id both stayed listed after the upgrade."""
+    old = {"id": -5270832187, "type": "group", "title": "Desk"}
+    gid, ch_id = setup_group(rt, ["ZM4521"], chat_id=str(old["id"]))
+    new_ch = rt.store.upsert_channel("telegram", "-1003471336376", title="Desk", chat_type="supergroup")   # seen first
+    msg(rt.bot, ADMIN_TG, old, "", migrate_to_chat_id=-1003471336376)
+    chats = rt.store.channels()
+    assert [c["chat_id"] for c in chats] == ["-1003471336376"]
+    assert chats[0]["id"] == new_ch["id"] and chats[0]["status"] == "ACTIVE" and [g["id"] for g in chats[0]["groups"]] == [gid]
+
+
+def test_remove_chat_really_removes_it(rt, client):
+    from conftest import H, login
+    login(client, "admin", "admin123")
+    _gid, ch_id = setup_group(rt, ["ZM4521"], chat_id="-5300624952")
+    assert client.delete(f"/api/telegram/chats/{ch_id}", headers=H).json() == {"ok": True}
+    assert rt.store.channels() == [] and rt.store.groups()[0]["channels"] == []

@@ -694,11 +694,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
         ch = rt.store.one("SELECT * FROM channels WHERE id = ?", (channel_id,))
         if not ch:
             raise HTTPException(404, "Chat not found")
-        with rt.store.tx() as c:
-            c.execute("DELETE FROM notifications WHERE channel_id = ? AND status IN ('QUEUED','FAILED')", (channel_id,))
-            c.execute("UPDATE notifications SET status = 'SKIPPED' WHERE channel_id = ? AND status = 'DEAD'", (channel_id,))
-            c.execute("DELETE FROM group_channels WHERE channel_id = ?", (channel_id,))
-            c.execute("UPDATE channels SET enabled = 0, status = 'DISABLED' WHERE id = ?", (channel_id,))
+        rt.store.delete_channel(channel_id)          # really gone from the list (it used to be only disabled)
         changed(u, "CHAT_REMOVED", ch["title"] or ch["chat_id"])
         return {"ok": True}
 
