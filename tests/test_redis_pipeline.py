@@ -170,6 +170,35 @@ def test_live_only_group_never_gets_paper_trades(rt):
     assert [n["type"] for n in notifs(rt)] == ["ORDER_PLACED", "ORDER_REJECTED"]
 
 
+def test_worker_alert_inherits_the_orders_mode_and_details(rt):
+    """Production: a PAPER order's 're-price attempts' worker alert reached the LIVE-only group (no mode on the alert)."""
+    import json as _json
+    from tradepulse.notify.format import event_text
+    start_live(rt)
+    gid, _ = setup_group(rt, ["J252505"])
+    rt.store.execute("UPDATE groups SET modes = ? WHERE id = ?", (_json.dumps(["LIVE"]), gid))
+    rt.store.put_settings({"track_alerts": True})
+    rt.processor.invalidate()
+    msg = "cancel requested after 50 re-price attempts without a full fill"
+    rt.sim.accounts["J252505"]["mode"] = "PAPER"
+    paper = rt.sim.order("J252505", outcome="open", instrument=INSTRUMENTS[0])
+    rt.sim._evt("J252505", "ALERT", {"level": "warning", "message": msg, "internal_order_id": paper["internal_order_id"]})
+    pump(rt)
+    assert notifs(rt) == []                                                   # paper order's alert: not sent
+    a = rt.store.one("SELECT * FROM events WHERE type = 'ACCOUNT_ALERT'")
+    assert a["trading_mode"] == "PAPER" and a["symbol"] == "NIFTY26NOV26000CE"
+    rt.sim.accounts["J252505"]["mode"] = "LIVE"
+    live = rt.sim.order("J252505", outcome="open", instrument=INSTRUMENTS[0])
+    rt.sim._evt("J252505", "ALERT", {"level": "warning", "message": msg, "internal_order_id": live["internal_order_id"]})
+    pump(rt)
+    sent = [n for n in notifs(rt) if n["type"] == "ACCOUNT_ALERT"]
+    assert len(sent) == 1
+    e = rt.store.one("SELECT * FROM events WHERE event_id = ?", (sent[0]["event_id"],))
+    e["payload"] = _json.loads(e["payload"])
+    card = event_text(e)
+    assert "Order worker warning" in card and "NIFTY 26000 CE" in card and "re-price" in card and "WORKER_ALERT" not in card
+
+
 def test_group_modes_api_validation(rt, client):
     from conftest import H, login
     login(client, "admin", "admin123")

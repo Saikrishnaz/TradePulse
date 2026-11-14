@@ -122,7 +122,13 @@ def event_text(e: dict) -> str:
     lines = [head, f"<b>{h(e.get('client_name') or '–')}</b>  <code>{h(show_id(e.get('account_id')))}</code>", ""]
     sym = h(pretty_symbol(e.get("symbol")))
     if et == ACCOUNT_ALERT:
-        lines.append(f"🚨 <b>{h(p.get('kind') or 'Alert')}</b>" + (f" · {sym}" if e.get("symbol") else ""))
+        critical = str(p.get("severity") or "").upper() == "CRITICAL"
+        kind = {"WORKER_ALERT": "Order worker"}.get(p.get("kind"), str(p.get("kind") or "Alert").replace("_", " ").title())
+        lines.append(f"{'🚨' if critical else '⚠️'} <b>{h(kind)} {'error' if critical else 'warning'}</b>")
+        if e.get("symbol"):
+            qty = int(e.get("quantity") or 0)
+            lines.append(f"{_side(e.get('side'), qty)} × <b>{sym}</b>"
+                         + (f" · filled <b>{int(e.get('filled_quantity') or 0):,}/{qty:,}</b>" if qty else ""))
         if e.get("message"):
             lines.append(f"<blockquote>{h(e['message'][:400])}</blockquote>")
     elif et == "RECONCILE_MISMATCH":

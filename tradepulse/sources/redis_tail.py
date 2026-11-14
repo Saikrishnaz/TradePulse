@@ -303,10 +303,23 @@ class RedisTail:
         elif msg_type == "ALERT":
             level = str(d.get("level") or "warning").upper()
             if level in ("ERROR", "WARNING") and self.store.setting("track_alerts"):
+                oid = str(d.get("internal_order_id") or "")
+                # An alert about an order inherits that order's details - above all its trading mode, so a
+                # PAPER order's alert never reaches a LIVE-only group.
+                o = self._order(oid) if oid else None
+                about = {}
+                if o:
+                    about = {"trading_mode": o["trading_mode"], "symbol": o["symbol"], "exchange": o["exchange"],
+                             "side": o["side"], "quantity": o["ordered_quantity"], "filled_quantity": o["filled_quantity"],
+                             "product": o["product"], "order_type": o["order_type"], "price": o["price"],
+                             "order_id": o["broker_order_id"] or "", "broker": o["broker"]}
+                elif oid:
+                    acct = self.store.one("SELECT trading_mode FROM accounts WHERE account_id = ?", (account,)) or {}
+                    about = {"trading_mode": acct.get("trading_mode") or ""}
                 e = ev.new_event(ev.ACCOUNT_ALERT, "OMS", f"walert:{mid}", account_id=account,
-                                 internal_order_id=str(d.get("internal_order_id") or ""), message=str(d.get("message") or "")[:500],
+                                 internal_order_id=oid, message=str(d.get("message") or "")[:500],
                                  payload={"kind": "WORKER_ALERT", "severity": "CRITICAL" if level == "ERROR" else "WARNING"},
-                                 occurred_at=at)
+                                 occurred_at=at, **about)
                 self._enqueue(e, backfill)
         elif msg_type in ("POSITION_BOOK", "HOLDINGS") and account:
             if d.get("error"):
