@@ -24,8 +24,8 @@ def link(rt, tg_user, username):
 def test_unlinked_private_user_gets_no_data(rt, tg):
     msg(rt.bot, STRANGER, PRIVATE(STRANGER), "/positions")
     assert "isn't linked" in tg.texts()[-1]
-    msg(rt.bot, STRANGER, PRIVATE(STRANGER), "what are my positions?")
-    assert "isn't linked" in tg.texts()[-1]
+    msg(rt.bot, STRANGER, PRIVATE(STRANGER), "what are my positions?")      # free text: command list only, no data
+    assert "/positions" in tg.texts()[-1] and "NIFTY" not in tg.texts()[-1]
 
 
 def test_link_code_single_use_and_scoped_answers(rt, tg):
@@ -87,14 +87,23 @@ def test_group_queries_can_be_disabled(rt, tg):
     assert "turned off" in tg.texts()[-1]
 
 
-def test_group_free_text_needs_mention(rt, tg):
+def test_group_chatter_ignored_mention_gets_command_list(rt, tg):
+    """No AI: ordinary group messages are ignored; mentioning the bot returns the command list."""
     setup_group(rt, ["ZM4521"], chat_id=str(GROUP["id"]))
     rt.bot.username = "TradePulseBot"
     msg(rt.bot, STRANGER, GROUP, "hello everyone")
     assert tg.sent == []
     msg(rt.bot, STRANGER, GROUP, "@TradePulseBot what is the status of the accounts?")
-    assert tg.sent and "Account status" in tg.texts()[-1]
+    assert tg.sent and "/status" in tg.texts()[-1] and "/help" in tg.texts()[-1]
     assert tg.sent[-1]["reply_to"] == 5
+
+
+def test_ask_command_is_gone(rt, tg):
+    setup_group(rt, ["ZM4521"], chat_id=str(GROUP["id"]))
+    msg(rt.bot, STRANGER, GROUP, "/ask what happened today")
+    assert "Unknown command" in tg.texts()[-1]
+    msg(rt.bot, STRANGER, GROUP, "/help")
+    assert "/ask" not in tg.texts()[-1]
 
 
 def test_commands_for_other_bots_ignored(rt, tg):

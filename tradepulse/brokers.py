@@ -208,7 +208,7 @@ class BrokerReaders:
             return [{"exchange": p.get("exchange", ""), "exchange_token": _int(p.get("symboltoken")),
                      "product": PRODUCT_FROM_ANGEL.get(str(p.get("producttype", "")).upper(), "NRML"),
                      "net_quantity": _int(p.get("netqty")), "broker_symbol": p.get("tradingsymbol") or "",
-                     "average_price": _float(p.get("avgnetprice") or p.get("netprice")),
+                     "average_price": _angel_average(p),
                      "last_price": _float(p.get("ltp")), "pnl": _float(p.get("pnl"))} for p in rows]
         out = []
         for h in rows:
@@ -283,6 +283,22 @@ class BrokerReaders:
                  "broker_symbol": p["broker_symbol"], "isin": "", "quantity": p["net_quantity"], "sellable": p["net_quantity"],
                  "t1_quantity": 0, "pledged_quantity": 0, "average_price": p["average_price"], "last_price": 0.0, "pnl": 0.0}
                 for p in positions if p["product"] in ("CNC", "MTF") and p["net_quantity"] > 0]
+
+
+def _angel_average(p: dict) -> float:
+    """Angel reports avgnetprice/netprice as 0 for a position carried overnight with no trade today; the
+    carried price is then in cfbuyavgprice / cfsellavgprice. Fall back by the side of the net position."""
+    for k in ("avgnetprice", "netprice"):
+        v = _float(p.get(k))
+        if v > 0:
+            return v
+    long_ = _int(p.get("netqty")) > 0
+    keys = ("cfbuyavgprice", "buyavgprice", "totalbuyavgprice") if long_ else ("cfsellavgprice", "sellavgprice", "totalsellavgprice")
+    for k in keys:
+        v = _float(p.get(k))
+        if v > 0:
+            return v
+    return 0.0                                   # unknown: the book then uses the broker's own P&L, never avg 0
 
 
 def _json(r: httpx.Response, broker: str) -> dict:

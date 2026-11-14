@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS book_positions (
     baseline_at     TEXT NOT NULL DEFAULT '',
     baseline_source TEXT NOT NULL DEFAULT '',
     fills_applied   INTEGER NOT NULL DEFAULT 0,
+    cost_known      INTEGER NOT NULL DEFAULT 1,     -- 0: the broker reported no average price for it
     updated_at      TEXT NOT NULL,
     PRIMARY KEY (account_id, exchange, exchange_token, product)
 );
@@ -431,6 +432,10 @@ class Store:
         self._wlock = threading.RLock()
         with self.conn() as c:
             c.executescript(SCHEMA)
+            # Additive migrations for databases created by an earlier version.
+            cols = {r[1] for r in c.execute("PRAGMA table_info(book_positions)")}
+            if "cost_known" not in cols:
+                c.execute("ALTER TABLE book_positions ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 1")
 
     @contextmanager
     def conn(self):

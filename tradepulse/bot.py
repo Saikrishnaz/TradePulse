@@ -37,7 +37,7 @@ COMMANDS = [
     ("positions", "Open positions"), ("holdings", "Holdings"), ("refresh", "Re-read from broker: /refresh positions|holdings ACCOUNT"), ("orders", "Today's orders"), ("pending", "Pending / working orders"),
     ("rejected", "Rejected orders today"), ("trades", "Executed trades today"), ("pnl", "P&L: /pnl [week|month]"),
     ("recent", "Recent activity"), ("order", "Order lifecycle: /order <id>"), ("accounts", "Accounts I can show you"),
-    ("groups", "Monitoring groups"), ("ask", "Ask anything: /ask what happened today?"),
+    ("groups", "Monitoring groups"),
     ("link", "Link your OMS login: /link CODE"), ("whoami", "Who you are to TradePulse"),
 ]
 
@@ -52,7 +52,7 @@ HELP = """<b>TradePulse</b> – trading monitor for the SkyMatrix OMS
 /recent – recent activity
 /order &lt;id&gt; – one order's lifecycle
 /accounts · /groups
-/ask &lt;question&gt; – or just type your question{group_hint}
+{group_hint}
 
 Private chat: link your OMS login first with /link CODE (create the code in the TradePulse dashboard).
 TradePulse is read-only: it never places or changes orders."""
@@ -63,8 +63,8 @@ def new_link_code() -> str:
 
 
 class Bot:
-    def __init__(self, store, svc, assistant, telegram_factory, bus=None, reconciler=None):
-        self.store, self.svc, self.assistant = store, svc, assistant
+    def __init__(self, store, svc, telegram_factory, bus=None, reconciler=None):
+        self.store, self.svc = store, svc
         self.telegram_factory = telegram_factory
         self.bus = bus
         self.reconciler = reconciler
@@ -186,13 +186,12 @@ class Bot:
                 return                                                # a command for another bot
             return self._command(cmd, arg.strip(), chat, tg_user, mid)
         if chat.get("type") == "private":
-            return self._ask(text, chat, tg_user, mid)
+            return self._hint(chat, mid)
         mentioned = self.username and f"@{self.username.lower()}" in text.lower()
         replied = ((msg.get("reply_to_message") or {}).get("from") or {}).get("username", "").lower() == self.username.lower() \
             if self.username else False
         if mentioned or replied:
-            q = re.sub(rf"@{re.escape(self.username)}", "", text, flags=re.I).strip() if self.username else text
-            return self._ask(q, chat, tg_user, mid)
+            return self._hint(chat, mid)
 
     # --- commands ------------------------------------------------------------------------------------
     def _command(self, cmd: str, arg: str, chat: dict, tg_user: dict, mid) -> None:
@@ -225,8 +224,10 @@ class Bot:
             return self.reply(cid, "Too many requests - please wait a minute.")
         if cmd == "refresh":
             return self._refresh(arg, chat, tg_user, scope)
-        acct_ids = self.svc.resolve_account(scope, arg) if arg and cmd not in ("pnl", "order", "ask") else None
-        if arg and acct_ids == [] and cmd not in ("pnl", "order", "ask"):
+        if cmd not in {c for c, _ in COMMANDS}:
+            return self.reply(cid, "Unknown command. Send /help for the list.")
+        acct_ids = self.svc.resolve_account(scope, arg) if arg and cmd not in ("pnl", "order") else None
+        if arg and acct_ids == [] and cmd not in ("pnl", "order"):
             return self.reply(cid, f"No account matching <b>{h(arg)}</b> is available here.")
         sub = Scope(acct_ids, scope.label) if acct_ids else scope
         if cmd == "status":
@@ -244,7 +245,7 @@ class Bot:
         elif cmd == "rejected":
             text = reports.orders_text(self.svc, scope, acct_ids, status="REJECTED")
         elif cmd == "trades":
-            text = self.assistant._trades_text(scope, acct_ids)
+            text = reports.trades_text(self.svc, scope, acct_ids)
         elif cmd == "pnl":
             period = arg.lower() if arg.lower() in ("today", "week", "month", "all") else "today"
             text = reports.pnl_text(self.svc, scope, period)
@@ -256,8 +257,6 @@ class Bot:
             text = reports.accounts_text(self.svc, scope)
         elif cmd == "groups":
             text = reports.groups_text(self._visible_groups(scope))
-        elif cmd == "ask":
-            return self._ask(arg, chat, tg_user, mid, scope=scope)
         else:
             text = "Unknown command. Send /help for the list."
         self.reply(cid, text)
@@ -336,26 +335,10 @@ class Bot:
         self.reply(cid, "✅ This group is active in TradePulse. Attach it to a monitoring group in the dashboard "
                         "to start receiving updates.")
 
-    def _ask(self, question: str, chat: dict, tg_user: dict, mid, scope: Scope | None = None) -> None:
-        cid = chat["id"]
-        if scope is None:
-            scope, why = self.chat_scope(chat, tg_user)
-            if scope is None:
-                return self.reply(cid, why, reply_to=mid)
-            if self._limited(f"u{tg_user['telegram_user_id']}"):
-                return self.reply(cid, "Too many requests - please wait a minute.", reply_to=mid)
-        if not question:
-            return self.reply(cid, "What would you like to know? e.g. <i>what's open on Mathew?</i>", reply_to=mid)
-        tg = self.tg()
-        if tg is not None:
-            tg.send_chat_action(cid)
-        key = f"{cid}:{tg_user['telegram_user_id']}"
-        context = "Telegram private chat" if chat.get("type") == "private" else f"Telegram group '{chat.get('title', '')}' ({scope.label})"
-        res = self.assistant.answer(question, scope, actor=f"tg:{tg_user['telegram_user_id']}", channel="telegram",
-                                    history=list(self._history[key]), context=context)
-        self._history[key].extend([{"role": "user", "content": question},
-                                   {"role": "assistant", "content": res["answer"]}])
-        self.reply(cid, h(res["answer"]), reply_to=mid)
+    def _hint(self, chat: dict, mid) -> None:
+        self.reply(chat["id"], "I answer commands: /status · /today · /positions · /holdings · /orders · /trades · /pnl · "
+                               "/recent · /order &lt;id&gt; · /refresh positions|holdings ACCOUNT. Send /help for details.",
+                   reply_to=mid)
 
     # --- polling loop ------------------------------------------------------------------------------
     def run_polling(self, stop: threading.Event) -> None:

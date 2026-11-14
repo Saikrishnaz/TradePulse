@@ -179,6 +179,36 @@ def test_missing_session_recorded_not_retried(rt, brokers, fast_slot):
     assert len(f) == 2 and "session" in f[0]["error"]
 
 
+def test_angel_carried_position_uses_cf_average_not_zero():
+    """Production bug: Angel reports avgnetprice/netprice 0 for positions carried overnight; the cost is in cf*avgprice."""
+    from tradepulse.brokers import _angel_average
+    assert _angel_average({"netqty": "-325", "avgnetprice": "0.00", "netprice": "0.00", "cfsellavgprice": "116.73",
+                           "cfbuyavgprice": "0.00"}) == 116.73
+    assert _angel_average({"netqty": "390", "avgnetprice": "0", "netprice": "0", "cfbuyavgprice": "50.23"}) == 50.23
+    assert _angel_average({"netqty": "75", "avgnetprice": "101.5", "cfbuyavgprice": "99"}) == 101.5
+    assert _angel_average({"netqty": "75"}) == 0.0
+
+
+def test_unknown_cost_uses_broker_pnl_never_avg_zero(rt, brokers, fast_slot):
+    """The live -22,347: two carried legs with avg 0. Book P&L must be the broker's own (-3,999.45), not net x LTP."""
+    from decimal import Decimal
+    rt.store.set_monitoring(["KS50310"], True, "t")
+    rt.keeper.apply_snapshot("KS50310", "positions", [
+        {"exchange": "NFO", "exchange_token": 64462, "product": "NRML", "net_quantity": -325, "broker_symbol": "NIFTY23NOV2625400CE",
+         "average_price": 0.0, "last_price": 137.7, "pnl": -6815.25},
+        {"exchange": "NFO", "exchange_token": 64487, "product": "NRML", "net_quantity": 390, "broker_symbol": "NIFTY23NOV2625750CE",
+         "average_price": 0.0, "last_price": 57.45, "pnl": 2815.8}], "USER:admin")
+    pos = {p["symbol"]: p for p in rt.oms.positions(["KS50310"], "open")}
+    assert pos["NIFTY23NOV2625400CE"]["unrealized_pnl_d"] == Decimal("-6815.25")
+    assert pos["NIFTY23NOV2625400CE"]["average_entry_price"] is None and pos["NIFTY23NOV2625400CE"]["pnl_source"] == "broker"
+    assert rt.oms.pnl(["KS50310"])["total"]["net"] == -3999.45
+    # a later trade on a cost-unknown position: no invented realized P&L, open P&L becomes n/a (not avg 0 maths)
+    from tradepulse.book import apply_fill
+    p = {"net_quantity": -325, "average_price": "0", "realized": "0", "cost_known": 0}
+    assert apply_fill(p, "BUY", 100, "140.00") == "REDUCED" and p["realized"] == "0.00" and p["cost_known"] == 0
+    assert apply_fill(p, "BUY", 225, "141.00") == "CLOSED" and p["cost_known"] == 1
+
+
 def test_all_three_brokers_parse(rt, brokers, fast_slot):
     for acct in ("ZM4521", "AM88213", "KS50310"):
         brokers.set(acct, positions=[{"exchange": "NFO", "token": 56723, "product": "NRML", "qty": -75, "symbol": "NIFTY26NOV26000CE", "avg": 100.0}],

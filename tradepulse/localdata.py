@@ -1,4 +1,4 @@
-"""TradePulse's data access over its OWN database - same interface the dashboard, bot and assistant
+"""TradePulse's data access over its OWN database - same interface the dashboard and bot
 used against the OMS before, so they are unchanged. Everything here was learnt from Redis (the OMS's
 streams and roster) or a read-only broker snapshot; the OMS itself is never contacted, so all of it
 keeps working after the OMS host goes down for the day.
@@ -251,7 +251,10 @@ class LocalData:
                 "trade_leg_id": f"{r['account_id']}:{r['exchange']}:{r['exchange_token']}:{r['product']}",
                 "direction": "LONG" if net > 0 else "SHORT" if net < 0 else "FLAT",
                 "open_quantity": abs(net), "closed_quantity": min(int(r["day_buy_qty"]), int(r["day_sell_qty"])),
-                "average_entry_price": float(bk.dec(r["average_price"])), "average_exit_price": None,
+                # None (shown "–") when the broker reported no cost: never present 0 as an average price
+                "average_entry_price": float(bk.dec(r["average_price"])) if (r["cost_known"] or not net) else None,
+                "average_exit_price": None,
+                "pnl_source": "broker" if (net and not r["cost_known"] and u is not None) else ("unpriced" if u is None else "book"),
                 "ltp": price, "realized_pnl_d": realized, "unrealized_pnl_d": u,
                 "realized_pnl": float(realized), "unrealized_pnl": None if u is None else float(u),
                 "status": "OPEN" if net else "CLOSED", "opened_at": r["baseline_at"], "closed_at": "",

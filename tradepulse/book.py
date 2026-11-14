@@ -47,6 +47,7 @@ def apply_fill(p: dict, side: str, qty: int, price) -> str:
     net = int(p.get("net_quantity") or 0)
     avg = dec(p.get("average_price"))
     realized = dec(p.get("realized"))
+    known = bool(p.get("cost_known", 1))
     if side.upper() == "BUY":
         p["day_buy_qty"] = int(p.get("day_buy_qty") or 0) + qty
     else:
@@ -55,17 +56,22 @@ def apply_fill(p: dict, side: str, qty: int, price) -> str:
         new = net + signed
         avg = (abs(net) * avg + qty * price) / abs(new)
         action = "OPENED" if net == 0 else "INCREASED"
+        if net == 0:
+            known = True                             # a fresh position: its cost is the fill price
     else:
         closing = min(qty, abs(net))
         direction = 1 if net > 0 else -1
-        realized += closing * (price - avg) * direction
+        if known:                                    # never book P&L against a cost the broker did not report
+            realized += closing * (price - avg) * direction
         new = net + signed
         if new == 0:
             action, avg = "CLOSED", D0
+            known = True
         elif (new > 0) != (net > 0):
-            action, avg = "FLIPPED", price           # the remainder opens at the fill price
+            action, avg, known = "FLIPPED", price, True   # the remainder opens at the fill price
         else:
             action = "REDUCED"
+    p["cost_known"] = 1 if known else 0
     p["net_quantity"] = new
     p["average_price"] = str(q2(avg) if avg else D0)
     p["realized"] = str(q2(realized))
@@ -73,9 +79,15 @@ def apply_fill(p: dict, side: str, qty: int, price) -> str:
 
 
 def unrealized(p: dict, ltp) -> Decimal | None:
+    """Open P&L vs the average price. Cost unknown (the broker reported no average): the broker's own
+    P&L from the snapshot while no trade has changed the position, else None (shown as n/a)."""
     net = int(p.get("net_quantity") or 0)
     if not net:
         return D0
+    if not int(p.get("cost_known", 1)) or dec(p.get("average_price")) <= 0:
+        if not int(p.get("fills_applied") or 0) and p.get("broker_pnl") not in (None, ""):
+            return q2(dec(p.get("broker_pnl")))
+        return None
     if ltp is None or float(ltp) <= 0:
         return None
     return q2(net * (dec(ltp) - dec(p.get("average_price"))))
@@ -112,6 +124,7 @@ def derive_positions(baseline: list[dict], fills: list[dict]) -> tuple[dict, dic
                    "instrument_class": r.get("instrument_class") or "",
                    "net_quantity": int(r.get("net_quantity") or 0),
                    "average_price": str(q2(dec(r.get("average_price")))),
+                   "cost_known": 0 if int(r.get("net_quantity") or 0) and dec(r.get("average_price")) <= 0 else 1,
                    "realized": "0", "day_buy_qty": 0, "day_sell_qty": 0,
                    "last_price": float(r.get("last_price") or 0), "broker_pnl": float(r.get("pnl") or 0),
                    "baseline_qty": int(r.get("net_quantity") or 0), "fills_applied": 0}
@@ -120,7 +133,7 @@ def derive_positions(baseline: list[dict], fills: list[dict]) -> tuple[dict, dic
         k = pos_key(f)
         p = book.setdefault(k, {"exchange": k[0], "exchange_token": k[1], "product": k[2],
                                 "symbol": f.get("symbol") or "", "instrument_class": f.get("instrument_class") or "",
-                                "net_quantity": 0, "average_price": "0", "realized": "0", "day_buy_qty": 0,
+                                "net_quantity": 0, "average_price": "0", "cost_known": 1, "realized": "0", "day_buy_qty": 0,
                                 "day_sell_qty": 0, "last_price": 0.0, "broker_pnl": 0.0, "baseline_qty": 0,
                                 "fills_applied": 0})
         if not p.get("symbol"):

@@ -234,7 +234,6 @@ const NAV = [
     ["performance", "Performance", "trending"]]],
   ["Manage", [["accounts", "Accounts", "users"], ["groups", "Groups", "folder"], ["telegram", "Telegram", "send"],
     ["notifications", "Notifications", "bell"], ["users", "Users", "shield"]]],
-  ["Assist", [["assistant", "AI assistant", "sparkles"]]],
   ["System", [["system", "Health & settings", "server"]]],
 ];
 const TITLES = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([k, l]) => [k, l])));
@@ -449,7 +448,6 @@ PAGES.overview = async (root) => {
           hl.reconcile ? `${esc(hl.reconcile.trigger.replace("SCHEDULED ", ""))} · ${esc(hl.reconcile.status)}${hl.reconcile.mismatches ? ` · ${hl.reconcile.mismatches} mismatch` : ""}` : "not yet today", "refresh")}
         ${H(hl.telegram ? (hl.bot_ok === false ? false : true) : null, "Telegram bot", hl.telegram ? (hl.bot_ok === false ? "Error" : "Configured") : "Not configured", "send")}
         ${H(hl.dead ? "warn" : true, "Delivery queue", `${hl.queue} queued · ${hl.dead} dead`, "bell")}
-        ${H(hl.assistant === "claude" ? true : "warn", "AI assistant", hl.assistant === "claude" ? "Claude" : "Rules engine", "sparkles")}
       </div></div></div>
       <div class="grid g-main">
         <div class="card"><div class="card-h"><h2>Live activity</h2><span class="sub">latest first</span><div class="actions"><a class="btn sm" href="#/feed">Open feed ${icon("chevron", 12)}</a></div></div>
@@ -1043,7 +1041,7 @@ PAGES.telegram = async (root) => {
             <td>${u.linked_at ? dt(u.linked_at) : "–"}</td><td>${ago(u.last_seen)}</td><td>${u.oms_user ? `<button class="btn sm danger" data-unlink="${esc(u.telegram_user_id)}">Unlink</button>` : ""}</td></tr>`).join("")}</tbody></table>`
           : empty("Nobody has messaged the bot yet")}</div></div></div>` : ""}
       <div class="card"><div class="card-h"><h2>Bot commands</h2></div><div class="card-b"><div class="grid g-3" style="gap:6px 16px;font-size:12px">
-        ${[["/status", "account status & health"], ["/today", "orders, trades, P&L today"], ["/positions [account]", "open positions"], ["/orders · /pending · /rejected", "today's orders"], ["/trades", "executed trades"], ["/pnl [week|month]", "P&L"], ["/recent", "recent activity"], ["/order <id>", "one order's lifecycle"], ["/ask <question>", "anything, in plain English"], ["/link CODE", "link your OMS login (private chat)"], ["/register", "activate a group (linked admin)"], ["/chatid", "show this chat's ID"]].map(([c, d]) => `<div><code class="inline">${esc(c)}</code> <span class="muted">${esc(d)}</span></div>`).join("")}</div></div></div>`;
+        ${[["/status", "account status & health"], ["/today", "orders, trades, P&L today"], ["/positions [account]", "open positions"], ["/orders · /pending · /rejected", "today's orders"], ["/trades", "executed trades"], ["/pnl [week|month]", "P&L"], ["/recent", "recent activity"], ["/order <id>", "one order's lifecycle"], ["/holdings [account]", "holdings"], ["/refresh positions|holdings ACCOUNT", "re-read from broker (1 / 3 s)"], ["/link CODE", "link your OMS login (private chat)"], ["/register", "activate a group (linked admin)"], ["/chatid", "show this chat's ID"]].map(([c, d]) => `<div><code class="inline">${esc(c)}</code> <span class="muted">${esc(d)}</span></div>`).join("")}</div></div></div>`;
     $("#codeBtn").addEventListener("click", async (e) => {
       const r = await busy(e.currentTarget, () => api("POST", "/api/telegram/link-code"));
       $("#codeOut").innerHTML = `<div class="callout">Send this to ${r.bot_username ? `<a href="https://t.me/${esc(r.bot_username)}" target="_blank" rel="noopener">@${esc(r.bot_username)}</a>` : "the bot"} in a private chat within 15 minutes:</div>
@@ -1151,34 +1149,6 @@ PAGES.notifications = async (root) => {
   await hist();
 };
 
-/* ============================== Assistant ============================== */
-PAGES.assistant = async (root) => {
-  const info = await GET("/api/assistant/info");
-  const history = [];
-  root.innerHTML = `<div class="card chat"><div class="card-h"><h2>${icon("sparkles", 16)} Ask TradePulse</h2><span class="sub">answers from live OMS data · only accounts you can see</span>
-      <div class="actions">${info.engine === "claude" ? badge("ACTIVE", `Claude · ${info.model}`) : badge("PENDING", "Rules engine")}</div></div>
-    <div class="chat-log" id="log" aria-live="polite"><div class="msg bot">Hi ${esc(state.me.name.split(" ")[0])}. Ask me about your accounts – status, open positions, today's trades, an order's lifecycle, or P&amp;L.${info.engine !== "claude" ? `<span class="meta">Natural-language answers use Claude when ANTHROPIC_API_KEY is configured; until then a built-in rules engine answers common questions.</span>` : ""}</div></div>
-    <div class="suggest">${["What is the current status of my accounts?", "Which positions are open?", "What trades were executed today?", "What is my overall P&L this week?", "Show rejected orders today", "What happened in Jayesh's account today?"].map((q) => `<button type="button">${esc(q)}</button>`).join("")}</div>
-    <form class="chat-form" id="askForm"><label for="askQ" class="sr-only">Question</label><input class="input" id="askQ" autocomplete="off" maxlength="2000" placeholder="e.g. What's the status of order 260916000276369?"><button class="btn primary" type="submit">${icon("send", 14)} Ask</button></form></div>`;
-  const log = $("#log");
-  const add = (cls, html) => { log.insertAdjacentHTML("beforeend", `<div class="msg ${cls}">${html}</div>`); log.scrollTop = log.scrollHeight; return log.lastElementChild; };
-  const ask = async (q) => {
-    if (!q.trim()) return;
-    add("user", esc(q));
-    const pending = add("bot", '<span class="skeleton" style="display:inline-block;width:160px;height:12px"></span>');
-    const btn = $("#askForm button");
-    try {
-      const r = await busy(btn, () => api("POST", "/api/assistant/ask", { question: q, history: history.slice(-8) }));
-      pending.innerHTML = `${esc(r.answer)}<span class="meta">${r.engine === "claude" ? "Claude" : "Rules engine"}${r.tools.length ? ` · looked at: ${esc([...new Set(r.tools)].join(", "))}` : ""}</span>`;
-      history.push({ role: "user", content: q }, { role: "assistant", content: r.answer });
-    } catch (e) { pending.innerHTML = `<span class="down">${esc(e.message)}</span>`; }
-    log.scrollTop = log.scrollHeight;
-  };
-  $("#askForm").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#askQ"); const q = i.value; i.value = ""; ask(q); });
-  $$(".suggest button", root).forEach((b) => b.addEventListener("click", () => ask(b.textContent)));
-  $("#askQ").focus();
-};
-
 /* ============================== System ============================== */
 PAGES.system = async (root) => {
   const admin = isAdmin();
@@ -1198,7 +1168,6 @@ PAGES.system = async (root) => {
         ${comp(h.processor.failed ? "warn" : true, "Processor", [`${n0(h.processor.processed)} stored · ${n0(h.processor.duplicates)} duplicates dropped`, `${h.processor.failed} failures`], "layers")}
         ${comp((h.notifications.DEAD || 0) ? "warn" : true, "Notifier", [`${n0(h.notifications.SENT || 0)} sent · ${h.notifications.QUEUED || 0} queued`, `${h.notifications.FAILED || 0} retrying · ${h.notifications.DEAD || 0} dead`], "bell")}
         ${comp(h.telegram.last_error ? "warn" : !!h.telegram.username || null, "Telegram bot", [h.telegram.username ? `@${esc(h.telegram.username)}` : "not connected", `${h.telegram.updates} updates · ${h.telegram.replies} replies`, h.telegram.last_error ? esc(h.telegram.last_error) : ""], "send")}
-        ${comp(h.assistant.engine === "claude" ? true : "warn", "AI assistant", [h.assistant.engine === "claude" ? "Claude" : "rules engine (no API key)"], "sparkles")}
         ${comp(h.vault.generated_key ? "warn" : true, "Secrets", [h.vault.generated_key ? "using generated key – set TP_FERNET_KEY" : "TP_FERNET_KEY set"], "shield")}
       </div></div></div>
     <div class="grid g-2">

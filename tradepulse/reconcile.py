@@ -78,11 +78,11 @@ class BookKeeper:
                         if kind == "positions":
                             c.execute("""INSERT INTO book_positions (account_id, exchange, exchange_token, product, symbol, instrument_class,
                                          net_quantity, average_price, realized, day_buy_qty, day_sell_qty, last_price, broker_pnl,
-                                         baseline_qty, baseline_at, baseline_source, fills_applied, updated_at)
-                                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                         baseline_qty, baseline_at, baseline_source, fills_applied, cost_known, updated_at)
+                                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                       (account_id, *k, r["symbol"], r["instrument_class"], r["net_quantity"], r["average_price"],
                                        r["realized"], r["day_buy_qty"], r["day_sell_qty"], r["last_price"], r["broker_pnl"],
-                                       r["baseline_qty"], base_at, base_src, r["fills_applied"], now))
+                                       r["baseline_qty"], base_at, base_src, r["fills_applied"], int(r.get("cost_known", 1)), now))
                         else:
                             c.execute("""INSERT INTO book_holdings (account_id, exchange, exchange_token, product, symbol, isin, quantity,
                                          sellable, t1_quantity, pledged_quantity, average_price, last_price, baseline_qty, baseline_at,

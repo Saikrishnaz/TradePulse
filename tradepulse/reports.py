@@ -1,5 +1,5 @@
 """Human-readable summaries (Telegram HTML) built from scoped data. Used by bot commands, the
-scheduled group digests / position reports, and the assistant when no LLM is configured."""
+scheduled group digests and position reports."""
 
 from __future__ import annotations
 
@@ -144,6 +144,17 @@ def order_text(svc: DataService, scope: Scope, ref: str) -> str:
                          f"({h(e['source'])}) {h((e['message'] or '')[:80])}")
     if o["fills"]:
         lines += ["", "<b>Fills</b>"] + [f"{f['quantity']} @ {num(f['price'])} · {h(hhmmss(f['filled_at']))}" for f in o["fills"]]
+    return "\n".join(lines)
+
+
+def trades_text(svc: DataService, scope: Scope, account_ids: list[str] | None = None) -> str:
+    rows = svc.oms.fills([a for a in (account_ids or scope.account_ids) if scope.allows(a)], day=today_ist(), limit=25)
+    if not rows:
+        return "💹 No trades executed today."
+    lines = [f"💹 <b>Trades today</b> ({len(rows)})", ""]
+    for f in rows:
+        lines.append(f"{h(f['filled_at'][11:19])} <b>{h(f['side'])}</b> {h(f['symbol'])} {f['quantity']} @ "
+                     f"{f['price']:,.2f} · {h(f['client_name'])} <code>{h(mask_account(f['account_id']))}</code>")
     return "\n".join(lines)
 
 

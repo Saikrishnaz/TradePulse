@@ -13,7 +13,6 @@ import logging
 import threading
 
 from . import bus as busmod
-from .assistant import Assistant
 from .bot import Bot
 from .brokers import BrokerReaders
 from .localdata import LocalData
@@ -34,7 +33,7 @@ log = logging.getLogger("tradepulse.runtime")
 
 
 class Runtime:
-    def __init__(self, settings, bus=None, store=None, telegram_client=None, ai_client=None, broker_http=None, oms=None):
+    def __init__(self, settings, bus=None, store=None, telegram_client=None, broker_http=None, oms=None):
         self.settings = settings
         self.store = store or Store(settings.DB_PATH)
         if bus is None:
@@ -47,11 +46,10 @@ class Runtime:
         self.bus = bus
         self.vault = Vault(self.store, settings.FERNET_KEY)
         ensure_bootstrap_admin(self.store, settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
-        self.oms = LocalData(self.store)               # name kept: the data interface the API/bot/assistant use
+        self.oms = LocalData(self.store)               # name kept: the data interface the API and bot use
         self.svc = DataService(self.oms, self.store, self.bus)
         self._tg_fixed = telegram_client
         self._tg_cache: tuple[str, TelegramClient] | None = None
-        self.assistant = Assistant(self.svc, self.store, settings, client=ai_client)
         self.processor = Processor(self.store, self.bus, self.oms)
         self.keeper = BookKeeper(self.store, self.bus)
         self.readers = BrokerReaders(self.bus, settings, self.store, http=broker_http)
@@ -61,7 +59,7 @@ class Runtime:
         self.whatsapp = WhatsAppProvider(self.vault)
         self.notifier = Notifier(self.store, self.bus, self.telegram, self.whatsapp)
         self.scheduler = Scheduler(self.store, self.bus, self.svc)
-        self.bot = Bot(self.store, self.svc, self.assistant, self.telegram, bus=self.bus, reconciler=self.reconciler)
+        self.bot = Bot(self.store, self.svc, self.telegram, bus=self.bus, reconciler=self.reconciler)
         self.adapters = adapters(self.oms, self.vault, settings)
         self.stop = threading.Event()
         self.threads: list[threading.Thread] = []

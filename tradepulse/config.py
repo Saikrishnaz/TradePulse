@@ -111,12 +111,6 @@ class Settings:
         self.TELEGRAM_API = g("TP_TELEGRAM_API", "https://api.telegram.org")
         self.TELEGRAM_MODE = g("TP_TELEGRAM_MODE", "polling")      # polling | webhook | off
 
-        # --- AI assistant -----------------------------------------------
-        self.AI_MODEL = g("TP_AI_MODEL", "claude-opus-5-5")
-        self.AI_EFFORT = g("TP_AI_EFFORT", "low")
-        self.AI_ENABLED = bool(overrides.get("AI_ENABLED", _bool("TP_AI_ENABLED", True)))
-        self.AI_FALLBACKS = bool(overrides.get("AI_FALLBACKS", _bool("TP_AI_FALLBACKS", True)))
-
         # --- webhooks ---------------------------------------------------
         self.WEBHOOK_RATE_PER_MIN = int(overrides.get("WEBHOOK_RATE_PER_MIN", _int("TP_WEBHOOK_RATE_PER_MIN", 600)))
 

@@ -179,11 +179,6 @@ class UserIn(BaseModel):
     account_ids: list[str] | None = Field(default=None, max_length=500)
 
 
-class AskIn(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    history: list[dict] = Field(default_factory=list, max_length=12)
-
-
 SETTINGS_RULES = {
     "broker_slot_seconds": (int, 3, 60),          # never below 3: the broker-load limit is a floor, not a target
     "oms_poll_interval_ms": (int, 250, 60000), "retry_max_attempts": (int, 1, 50), "retry_base_seconds": (int, 1, 600),
@@ -879,7 +874,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
             "reconcile": {"running": rt.reconciler.current or (comps.get("reconciler") or {}).get("running"),
                           "last": rt.store.one("SELECT * FROM reconcile_runs ORDER BY id DESC LIMIT 1"),
                           "times": rt.store.setting("reconcile_times")},
-            "notifications": q, "assistant": {"engine": rt.assistant.engine},
+            "notifications": q,
             "telegram": {"updates": 0, "replies": 0, **_live("telegram_bot", rt.bot.stats, comps)},
             "vault": {"generated_key": rt.vault.generated_key}, "components": comps,
             "cursors": {r["name"]: r["value"] for r in rt.store.rows("SELECT * FROM cursors")} if u["role"] == "ADMIN" else {},
@@ -896,8 +891,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
                 "telegram": bool(rt.bot_token()), "bot_ok": (_health_component("telegram_bot") or {}).get("ok"),
                 "last_tick": tail.get("last_tick"), "queue": rt.store.one(
                     "SELECT COUNT(*) AS n FROM notifications WHERE status IN ('QUEUED','FAILED')")["n"],
-                "dead": rt.store.one("SELECT COUNT(*) AS n FROM notifications WHERE status = 'DEAD'")["n"],
-                "assistant": rt.assistant.engine}
+                "dead": rt.store.one("SELECT COUNT(*) AS n FROM notifications WHERE status = 'DEAD'")["n"]}
 
     def _health_component(name: str):
         return _safe_json(rt.bus.hgetall(busmod.HEALTH).get(name))
@@ -1005,20 +999,6 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
             c.execute("UPDATE accounts SET user_id = NULL WHERE user_id = ?", (user_id,))
             for a in account_ids:
                 c.execute("UPDATE accounts SET user_id = ? WHERE account_id = ?", (user_id, a))
-
-    # --- assistant -------------------------------------------------------------------------------------
-    @app.post("/api/assistant/ask")
-    def assistant_ask(body: AskIn, u: dict = Depends(user), sc: Scope = Depends(scope)):
-        if not limiter.hit(f"ask:{u['id']}", 30):
-            raise HTTPException(429, "Too many questions - wait a minute.")
-        history = [{"role": m.get("role"), "content": str(m.get("content", ""))[:4000]} for m in body.history
-                   if m.get("role") in ("user", "assistant")]
-        return rt.assistant.answer(body.question, sc, actor=u["username"], channel="dashboard", history=history,
-                                   context=f"TradePulse dashboard, signed in as {u['name']} ({u['role']})")
-
-    @app.get("/api/assistant/info")
-    def assistant_info(u: dict = Depends(user)):
-        return {"engine": rt.assistant.engine, "model": settings.AI_MODEL if rt.assistant.engine == "claude" else None}
 
     @app.get("/api/meta")
     def meta(u: dict = Depends(user)):

@@ -1,4 +1,4 @@
-"""Scoped data access shared by the dashboard API, the Telegram bot and the AI assistant.
+"""Scoped data access shared by the dashboard API, and the Telegram bot.
 
 Every method takes ``scope`` - the account ids the caller may see - and never returns anything
 outside it. The scope is computed once per request/message (``Scope``) from the OMS user's role

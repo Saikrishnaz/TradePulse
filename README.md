@@ -1,8 +1,8 @@
 # TradePulse
 
-Real-time monitoring, positions & holdings reconciliation, notifications and an AI assistant for the
-**SkyMatrix OMS**. A central dashboard controls everything; a Telegram bot (**TradePulse**) delivers
-updates to groups and answers questions in groups and private chats.
+Real-time monitoring, positions & holdings reconciliation and notifications for the **SkyMatrix OMS**.
+A central dashboard controls everything; a Telegram bot (**TradePulse**) delivers updates to groups and
+answers commands in groups and private chats.
 
 > **Connected only to Redis.** TradePulse never opens the OMS database or calls the OMS API, so it keeps
 > working after the OMS host goes down for the day (OMS hours 08:45–15:50). It never places, modifies or
@@ -28,7 +28,7 @@ updates to groups and answers questions in groups and private chats.
             fills ──▶ BOOK = broker baseline (09:00 / 09:05 / refresh) ⊕ every fill since   (Decimal, idempotent)
                                   │
    events ─▶ processor (dedupe) ─▶ store ─▶ rules ─▶ outbox ─▶ Telegram groups      SSE ─▶ dashboard
-                                                                                     bot ◀─▶ assistant (scoped)
+                                                                                     bot (commands, scoped)
 ```
 
 | Component | Module | Notes |
@@ -38,7 +38,7 @@ updates to groups and answers questions in groups and private chats.
 | Reconciler | `reconcile.Reconciler` | 09:00 + 09:05 IST (configurable), monitored accounts; user refresh; mismatch alerts |
 | Broker readers | `brokers.py` | Zerodha / Angel / 5paisa positions + holdings only; global Redis slot; no retries; paper from Redis |
 | Local data | `localdata.py` | TradePulse's own copy of users, accounts, orders, fills, book - same scoping rules as the OMS |
-| Processor / rules / notifier / bot / assistant | as before | dedupe, precedence, durable outbox, Telegram, Claude |
+| Processor / rules / notifier / bot | `processor.py`, `rules.py`, `notify/`, `bot.py` | dedupe, precedence, durable outbox, Telegram commands |
 
 ### What TradePulse reads from the OMS's Redis (and why it is enough)
 
@@ -125,7 +125,7 @@ python scripts/oms_redis_sim.py --redis redis://127.0.0.1:6379/0 run --n 20     
 
 Commands: `/status` `/today` `/positions [acct]` `/holdings [acct]` `/refresh positions|holdings ACCT`
 `/orders` `/pending` `/rejected` `/trades` `/pnl [week|month]` `/recent` `/order <id>` `/accounts`
-`/groups` `/ask <question>` `/link CODE` `/whoami` `/register` `/chatid`.
+`/groups` `/link CODE` `/whoami` `/register` `/chatid`.
 In groups the scope is the group's accounts; in private chat it is the linked user's accounts.
 
 ## Notification rules
@@ -133,11 +133,6 @@ In groups the scope is the group's accounts; in private chat it is the linked us
 Sent only for **monitored**, unmuted accounts in an enabled group with an active chat, for enabled
 trading modes. Event-type precedence (first explicit On/Off wins): **Account › Client › Group › Global
 › default**. New event types: `HOLDING_UPDATED`, `RECONCILE_MISMATCH` (both on by default).
-
-## AI assistant
-
-`ANTHROPIC_API_KEY` enables Claude (`claude-opus-5-5`, effort `low`, refusal fallbacks on) with scoped
-tools incl. `get_holdings`; it cannot trigger broker reads. Without a key the rules engine answers.
 
 ## Security
 

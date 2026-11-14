@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("TP_BCRYPT_ROUNDS", "4")
-from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import httpx
@@ -125,7 +124,7 @@ class FakeBrokers:
 
 
 def make_settings(tmp_path, **kw):
-    return Settings(TP_DB_PATH=str(tmp_path / "tp.db"), USE_MEMORY_BUS=True, RUN_WORKERS=False, AI_ENABLED=False,
+    return Settings(TP_DB_PATH=str(tmp_path / "tp.db"), USE_MEMORY_BUS=True, RUN_WORKERS=False,
                     TP_FERNET_KEY="", TP_ADMIN_PASSWORD="", **kw)
 
 
@@ -213,36 +212,6 @@ def login(client, username, password):
     r = client.post("/api/auth/login", json={"username": username, "password": password}, headers=H)
     assert r.status_code == 200, r.text
     return r.json()
-
-
-# --- fake Claude --------------------------------------------------------------------------------
-def block_text(text):
-    return SimpleNamespace(type="text", text=text)
-
-
-def block_tool(id_, name, input_):
-    return SimpleNamespace(type="tool_use", id=id_, name=name, input=input_)
-
-
-class FakeClaude:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.requests = []
-        outer = self
-
-        class _M:
-            def create(self, **kw):
-                outer.requests.append(kw)
-                r = outer.responses.pop(0)
-                if isinstance(r, Exception):
-                    raise r
-                return r
-        self.beta = SimpleNamespace(messages=_M())
-        self.messages = _M()
-
-
-def resp(stop_reason, *blocks):
-    return SimpleNamespace(stop_reason=stop_reason, content=list(blocks))
 
 
 # Instruments (exchange, token, symbol, class, lot, ref, product) - same as the simulator
