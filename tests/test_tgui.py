@@ -51,6 +51,7 @@ def test_tap_edits_the_same_message_in_place(rt, tg):
     assert len(tg.sent) == sent_before                       # no new chat message
     e = tg.edits[-1]
     assert e["message_id"] == 10 and "Open positions" in e["text"] and "NIFTY 26000 CE" in e["text"]
+    assert "👤 <b>Mathew</b>  <code>ZM4521</code>" in e["text"] and "<blockquote>" in e["text"]   # one block per account
     assert tg.answers[-1]["alert"] is False                  # spinner stopped
     tap(rt, tgui.cb("home"))
     assert "⚡ <b>TradePulse</b>" in tg.edits[-1]["text"]

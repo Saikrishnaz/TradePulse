@@ -295,54 +295,144 @@ def account_card(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
         [btn("⬅️ Home", "home"), btn("↻ Update", "ac", acct)])
 
 
+def pct(now, base) -> str:
+    try:
+        if not base:
+            return ""
+        v = (float(now) - float(base)) / float(base) * 100
+    except (TypeError, ValueError):
+        return ""
+    return f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):.1f}%"
+
+
+def rupees(v) -> str:
+    return "–" if v is None else f"₹{float(v):,.0f}"
+
+
+def by_account(rows: list[dict]) -> dict:
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["account_id"], []).append(r)
+    return out
+
+
+def account_head(r: dict, extra: str) -> list[str]:
+    name = (r.get("client_name") or r["account_id"])
+    return [f"👤 <b>{h(name)}</b>  <code>{h(show_id(r['account_id']))}</code> · {h(broker_name(r.get('broker')))}",
+            f"<i>{extra}</i>"]
+
+
+def _pos_pnl(r: dict) -> float:
+    return (r["unrealized_pnl"] or 0) + (r["realized_pnl"] or 0)
+
+
 def positions(svc, scope: Scope, acct=None, page=0, banner="", **_) -> tuple[str, dict]:
+    """Summary first (net, long/short, best/worst), then one block per account: its subtotal and its
+    positions, worst first, so a reader sees which client is hurting at a glance."""
     ids = book_for(svc, scope, acct)
     rows = svc.oms.positions(ids, "open", ltp=svc.ltp)
-    unpriced = sum(1 for r in rows if r["unrealized_pnl"] is None)
-    total = sum(r["unrealized_pnl"] or 0 for r in rows) + sum(r["realized_pnl"] or 0 for r in rows)
-    net_txt = money(total, bold=False) + (f" ({unpriced} unpriced)" if unpriced else "") if unpriced < len(rows) else "n/a"
+    priced = [r for r in rows if r["unrealized_pnl"] is not None]
+    unpriced = len(rows) - len(priced)
+    total = sum(_pos_pnl(r) for r in rows)
     base = svc.oms.baselines(ids)
     ats = [b["positions"]["at"] for b in base.values() if "positions" in b]
+    groups = by_account(rows)
     lines = [banner + "\n" if banner else "", f"📊 <b>Open positions</b> · {scope_label(svc, scope, acct)}",
-             f"<i>{len(rows)} open · net {net_txt} · "
-             f"{'snapshot ' + hm(min(ats)) + ' + live' if ats else 'from today’s trades'}</i>", ""]
-    for r in rows[page * PAGE:(page + 1) * PAGE]:
-        avg = num(r["average_entry_price"]) if r["average_entry_price"] is not None else "–"
-        pnl_note = " <i>(broker)</i>" if r.get("pnl_source") == "broker" else ""
-        lines += [f"<b>{h(pretty_symbol(r['symbol']))}</b>  {side_badge(r['direction'], abs(r['net_quantity']))}",
-                  (f"   avg {avg} → <b>{num(r['ltp'])}</b>   {money(r['unrealized_pnl'])}{pnl_note}" if r["ltp"]
-                   else f"   avg {avg} · <i>no live price</i>" + (f"   {money(r['unrealized_pnl'])}{pnl_note}" if r["unrealized_pnl"] is not None else "")),
-                  f"   <i>{h(acct_label(r))} · {h(r['product'])}</i>", ""]
+             f"<i>{'broker ' + hm(min(ats)) + ' + live fills' if ats else 'from today’s trades'} · {stamp()}</i>", ""]
+    if rows:
+        longs = sum(1 for r in rows if r["direction"] == "LONG")
+        lines += [f"💰 Net  {money(total) if priced else '<i>n/a</i>'}" + (f"  <i>({unpriced} unpriced)</i>" if unpriced else ""),
+                  f"🟢 {longs} long · 🔴 {len(rows) - longs} short" + (f" · 👥 {len(groups)} accounts" if len(groups) > 1 else "")]
+        if len(priced) > 1:
+            best, worst = max(priced, key=_pos_pnl), min(priced, key=_pos_pnl)
+            if _pos_pnl(best) > 0:
+                lines.append(f"🏆 {h(pretty_symbol(best['symbol']))}  {money(_pos_pnl(best), bold=False)}")
+            if _pos_pnl(worst) < 0:
+                lines.append(f"⚠️ {h(pretty_symbol(worst['symbol']))}  {money(_pos_pnl(worst), bold=False)}")
+    # worst account first, worst position first inside it
+    order = sorted(groups, key=lambda k: sum(_pos_pnl(r) for r in groups[k]))
+    flat = [r for k in order for r in sorted(groups[k], key=_pos_pnl)]
+    chunk = flat[page * PAGE:(page + 1) * PAGE]
+    for aid, items in by_account(chunk).items():
+        allr = groups[aid]
+        sub = (money(sum(_pos_pnl(r) for r in allr), bold=False) if any(r["unrealized_pnl"] is not None for r in allr)
+               else "P&amp;L n/a")
+        lines += [""] + account_head(allr[0], f"{plural(len(allr), 'position')} · {sub}")
+        cards = []
+        for r in items:
+            dot = "🟢" if r["direction"] == "LONG" else "🔴"
+            avg = r["average_entry_price"]
+            price = (f"avg {num(avg)} → <b>{num(r['ltp'])}</b>" + (f" ({pct(r['ltp'], avg)})" if avg else "")
+                     if avg is not None and r["ltp"] else f"LTP <b>{num(r['ltp'])}</b>" if r["ltp"] else "<i>no live price</i>")
+            src = "  <i>broker P&amp;L</i>" if r.get("pnl_source") == "broker" else ""
+            cards.append("\n".join([
+                f"{dot} <b>{h(pretty_symbol(r['symbol']))}</b>",
+                f"{h(r['direction'])} {abs(r['net_quantity']):,} · {h(r['product'])} · {price}",
+                (money(_pos_pnl(r)) if r["unrealized_pnl"] is not None else "<i>P&amp;L n/a</i>") + src]))
+        lines.append("<blockquote>" + "\n\n".join(cards) + "</blockquote>")
     if not rows:
         lines.append("<i>No open positions.</i>")
     return "\n".join(lines).strip(), kb(account_row("pos", acct, scope, svc), pager("pos", acct, None, page, len(rows)),
                                         [btn("🔄 Refresh from broker", "ref", acct or "-")] if acct else [],
+                                        [btn("🏦 Holdings", "hold", acct or "-")] if not scope.is_group else [],
                                         nav_row("pos", acct, page=page))
 
 
 def holdings(svc, scope: Scope, acct=None, page=0, banner="", **_) -> tuple[str, dict]:
+    """Portfolio summary (invested → value, P&L %, gainers/losers), then one block per account."""
     ids = book_for(svc, scope, acct)
     rows = svc.oms.holdings(ids, ltp=svc.ltp)
-    value = sum(r["value"] or 0 for r in rows)
-    pnl = sum(r["pnl"] or 0 for r in rows)
+    priced = [r for r in rows if r["value"] is not None]
+    invested = sum(r["average_price"] * r["quantity"] for r in priced)
+    value = sum(r["value"] for r in priced)
+    pnl = sum(r["pnl"] or 0 for r in priced)
+    base = svc.oms.baselines(ids)
+    ats = [b["holdings"]["at"] for b in base.values() if "holdings" in b]
+    groups = by_account(rows)
     lines = [banner + "\n" if banner else "", f"🏦 <b>Holdings</b> · {scope_label(svc, scope, acct)}",
-             f"<i>{len(rows)} stocks · value ₹{value:,.0f} · P&amp;L {money(pnl, bold=False)}</i>", ""]
-    for r in rows[page * PAGE:(page + 1) * PAGE]:
-        extra = []
-        if r["t1_quantity"]:
-            extra.append(f"T1 {r['t1_quantity']}")
-        if r["pledged_quantity"]:
-            extra.append(f"pledged {r['pledged_quantity']}")
-        if r["change"]:
-            extra.append(f"today {'+' if r['change'] > 0 else ''}{r['change']}")
-        lines += [f"<b>{h(pretty_symbol(r['symbol']))}</b>  ×{r['quantity']:,}" + (f"  <i>({', '.join(extra)})</i>" if extra else ""),
-                  (f"   avg {num(r['average_price'])} → <b>{num(r['ltp'])}</b>   {money(r['pnl'])}" if r["ltp"]
-                   else f"   avg {num(r['average_price'])} · <i>no live price</i>"),
-                  f"   <i>{h(acct_label(r))}</i>", ""]
+             f"<i>{'broker ' + hm(min(ats)) + ' + live fills' if ats else 'from today’s trades'} · {stamp()}</i>", ""]
+    if rows:
+        up = sum(1 for r in priced if (r["pnl"] or 0) > 0)
+        cost = sum(r["average_price"] * r["quantity"] for r in rows)
+        lines += ([f"💼 Invested {rupees(invested)} → <b>{rupees(value)}</b>",
+                   f"💰 P&amp;L  {money(pnl)}" + (f"  <i>({pct(value, invested)})</i>" if invested else "")] if priced
+                  else [f"💼 Cost <b>{rupees(cost)}</b>  <i>(no live prices yet)</i>"]) + [
+                  f"📈 {up} up · 📉 {len(priced) - up} down" + (f" · {len(rows) - len(priced)} unpriced" if len(priced) < len(rows) else "")
+                  + (f" · 👥 {len(groups)} accounts" if len(groups) > 1 else "")]
+    order = sorted(groups, key=lambda k: -sum(r["value"] or 0 for r in groups[k]))
+    flat = [r for k in order for r in sorted(groups[k], key=lambda r: -(r["value"] or 0))]
+    chunk = flat[page * PAGE:(page + 1) * PAGE]
+    for aid, items in by_account(chunk).items():
+        allr = groups[aid]
+        av = sum(r["value"] or 0 for r in allr)
+        ap = sum(r["pnl"] or 0 for r in allr)
+        if any(r["value"] is not None for r in allr):
+            sub = f"{rupees(av)} · {money(ap, bold=False)}"
+        else:
+            sub = f"cost {rupees(sum(r['average_price'] * r['quantity'] for r in allr))}"
+        lines += [""] + account_head(allr[0], f"{plural(len(allr), 'stock')} · {sub}")
+        cards = []
+        for r in items:
+            g = r["pnl"]
+            icon = "📈" if (g or 0) > 0 else "📉" if (g or 0) < 0 else "▫️"
+            extra = []
+            if r["t1_quantity"]:
+                extra.append(f"T1 {r['t1_quantity']}")
+            if r["pledged_quantity"]:
+                extra.append(f"pledged {r['pledged_quantity']}")
+            if r["change"]:
+                extra.append(f"{'bought' if r['change'] > 0 else 'sold'} {abs(r['change'])} today")
+            cards.append("\n".join([
+                f"{icon} <b>{h(pretty_symbol(r['symbol']))}</b> ×{r['quantity']:,}" + (f"  <i>{h(' · '.join(extra))}</i>" if extra else ""),
+                (f"avg {num(r['average_price'])} → <b>{num(r['ltp'])}</b> · {rupees(r['value'])}" if r["ltp"]
+                 else f"avg {num(r['average_price'])} · <i>no live price</i>"),
+                (money(g) + f"  <i>({pct(r['ltp'], r['average_price'])})</i>") if g is not None else "<i>P&amp;L n/a</i>"]))
+        lines.append("<blockquote>" + "\n\n".join(cards) + "</blockquote>")
     if not rows:
         lines.append("<i>No holdings recorded.</i>")
     return "\n".join(lines).strip(), kb(account_row("hold", acct, scope, svc), pager("hold", acct, None, page, len(rows)),
                                         [btn("🔄 Refresh from broker", "ref", acct or "-")] if acct else [],
+                                        [btn("📊 Positions", "pos", acct or "-")] if not scope.is_group else [],
                                         nav_row("hold", acct, page=page))
 
 
