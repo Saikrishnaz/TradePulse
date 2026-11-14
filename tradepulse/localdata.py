@@ -30,6 +30,14 @@ def mask_account(account_id: str) -> str:
     return "****" + s[-4:]
 
 
+def _modes(col: str, modes) -> tuple[str, tuple]:
+    """SQL filter on a trading-mode column; ``None`` = every mode. Rows without a mode always pass."""
+    if modes is None:
+        return "", ()
+    ms = [str(m).upper() for m in modes] or ["-"]
+    return f" AND (COALESCE({col}, '') = '' OR {col} IN ({','.join('?' * len(ms))}))", tuple(ms)
+
+
 def _in(col: str, ids: list[str]) -> tuple[str, tuple]:
     return f"{col} IN ({','.join('?' * len(ids))})", tuple(ids)
 
@@ -132,7 +140,7 @@ class LocalData:
         return r["account_id"] if r else None
 
     # --- orders / fills -------------------------------------------------------------------------------
-    def orders(self, account_ids, day=None, status=None, search=None, limit=200) -> list[dict]:
+    def orders(self, account_ids, day=None, status=None, search=None, limit=200, modes=None) -> list[dict]:
         if not account_ids:
             return []
         w, p = _in("o.account_id", account_ids)
@@ -153,6 +161,10 @@ class LocalData:
         if search:
             clauses.append("(o.symbol LIKE ? OR o.internal_order_id LIKE ? OR o.broker_order_id LIKE ?)")
             params.extend([f"%{search}%"] * 3)
+        mw, mp = _modes("o.trading_mode", modes)
+        if mw:
+            clauses.append(mw[5:])
+            params.extend(mp)
         return self._rows(f"""
             SELECT o.internal_order_id, o.broker_order_id, o.account_id, o.broker, o.trading_mode, o.strategy_id, o.exchange,
                    o.symbol, o.side, o.product, o.order_type, o.ordered_quantity, o.filled_quantity, o.price, o.average_price,
@@ -161,10 +173,12 @@ class LocalData:
               FROM orders o LEFT JOIN accounts a ON a.account_id = o.account_id LEFT JOIN users u ON u.id = a.user_id
              WHERE {' AND '.join(clauses)} ORDER BY o.created_at DESC LIMIT ?""", (*params, int(limit)))
 
-    def order(self, account_ids, ref) -> dict | None:
+    def order(self, account_ids, ref, modes=None) -> dict | None:
         if not account_ids or not ref:
             return None
         w, p = _in("o.account_id", account_ids)
+        mw, mp = _modes("o.trading_mode", modes)
+        w, p = w + mw, (*p, *mp)
         o = self._one(f"""SELECT o.*, COALESCE(NULLIF(a.client_name, ''), u.name, '') AS client_name FROM orders o
                             LEFT JOIN accounts a ON a.account_id = o.account_id LEFT JOIN users u ON u.id = a.user_id
                            WHERE (o.internal_order_id = ? OR o.broker_order_id = ?) AND {w}
@@ -178,11 +192,13 @@ class LocalData:
                                      FROM fills WHERE internal_order_id = ? ORDER BY filled_at, id""", (o["internal_order_id"],))
         return o
 
-    def fills(self, account_ids, day=None, limit=200) -> list[dict]:
+    def fills(self, account_ids, day=None, limit=200, modes=None) -> list[dict]:
         if not account_ids:
             return []
         w, p = _in("f.account_id", account_ids)
-        params = list(p)
+        mw, mp = _modes("COALESCE(o.trading_mode, a.trading_mode, '')", modes)
+        params = [*p, *mp]
+        w += mw
         extra = ""
         if day:
             extra = " AND substr(f.filled_at, 1, 10) = ?"
@@ -196,12 +212,14 @@ class LocalData:
               LEFT JOIN accounts a ON a.account_id = f.account_id LEFT JOIN users u ON u.id = a.user_id
              WHERE {w}{extra} ORDER BY f.filled_at DESC, f.id DESC LIMIT ?""", (*params, int(limit)))
 
-    def order_counts(self, account_ids, day) -> dict:
+    def order_counts(self, account_ids, day, modes=None) -> dict:
         base = {"total": 0, "filled": 0, "partial": 0, "pending": 0, "rejected": 0, "cancelled": 0, "failed": 0}
         out = {"_all": dict(base)}
         if not account_ids:
             return out
         w, p = _in("account_id", account_ids)
+        mw, mp = _modes("trading_mode", modes)
+        w, p = w + mw, (*p, *mp)
         for r in self._rows(f"SELECT account_id, status, COUNT(*) AS n FROM orders WHERE {w} AND substr(created_at,1,10) = ? "
                             "GROUP BY account_id, status", (*p, day)):
             key = {"COMPLETE": "filled", "PARTIALLY_FILLED": "partial", "REJECTED": "rejected", "CANCELLED": "cancelled",

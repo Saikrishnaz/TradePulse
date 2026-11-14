@@ -24,9 +24,23 @@ class Scope:
     label: str = ""                      # "Mathew (CLIENT)" / "group: VIP Clients"
     user: dict | None = None
     group_ids: list[int] = field(default_factory=list)
+    modes: list[str] | None = None       # trading modes this chat sees; None = every mode (private chats)
+    name: str = ""                       # the group's own name, for group chats
 
     def allows(self, account_id: str) -> bool:
         return account_id in self.account_ids
+
+    @property
+    def is_group(self) -> bool:
+        return bool(self.group_ids)
+
+    def narrow(self, account_ids: list[str]) -> "Scope":
+        """The same chat looking at fewer accounts (keeps the trading-mode filter)."""
+        return Scope([a for a in account_ids if self.allows(a)], self.label, self.user, list(self.group_ids),
+                     self.modes, self.name)
+
+    def mode_ok(self, mode: str | None) -> bool:
+        return self.modes is None or not mode or str(mode).upper() in self.modes
 
 
 class DataService:
@@ -40,8 +54,19 @@ class DataService:
 
     def scope_for_groups(self, groups: list[dict], user: dict | None = None) -> Scope:
         ids = sorted({a for g in groups if g["enabled"] for a in g["account_ids"]})
-        return Scope(ids, "group: " + ", ".join(g["name"] for g in groups), user=user,
-                     group_ids=[g["id"] for g in groups])
+        global_modes = [str(m).upper() for m in (self.store.setting("notify_modes") or [])]
+        modes = sorted({m for g in groups for m in (g.get("modes") or global_modes)})
+        names = ", ".join(g["name"] for g in groups)
+        return Scope(ids, "group: " + names, user=user, group_ids=[g["id"] for g in groups], modes=modes, name=names)
+
+    def book_ids(self, scope: Scope, ids: list[str] | None = None) -> list[str]:
+        """Accounts whose position book this chat may see: a paper-broker account's book is PAPER, every
+        other account's book is the real broker book (LIVE)."""
+        ids = [i for i in (ids if ids is not None else scope.account_ids) if scope.allows(i)]
+        if scope.modes is None:
+            return ids
+        brokers = {a["account_id"]: str(a.get("broker") or "").lower() for a in self.oms.accounts(ids)}
+        return [i for i in ids if scope.mode_ok("PAPER" if brokers.get(i) == "paper" else "LIVE")]
 
     # --- live price (read-only; the OMS market-data publisher owns LTP:*) ----------------
     def ltp(self, leg: dict) -> float | None:
@@ -182,6 +207,10 @@ class DataService:
         if search:
             where.append("(symbol LIKE ? OR order_id LIKE ? OR internal_order_id LIKE ? OR trade_id LIKE ? OR client_name LIKE ?)")
             p.extend([f"%{search}%"] * 5)
+        if scope.modes is not None:
+            ms = scope.modes or ["-"]
+            where.append(f"(COALESCE(trading_mode, '') = '' OR trading_mode IN ({','.join('?' * len(ms))}))")
+            p.extend(ms)
         if before_id:
             where.append("id < ?")
             p.append(int(before_id))
@@ -222,7 +251,7 @@ class DataService:
     # --- performance -------------------------------------------------------------------------
     def performance(self, scope: Scope, period: str = "today") -> dict:
         start = period_start(period)
-        pnl = self.oms.pnl(scope.account_ids, since_day=start, ltp=self.ltp)
+        pnl = self.oms.pnl(self.book_ids(scope), since_day=start, ltp=self.ltp)
         names = {a["account_id"]: a for a in self.oms.accounts(scope.account_ids)}
         rows = []
         for aid in scope.account_ids:

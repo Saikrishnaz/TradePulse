@@ -34,7 +34,7 @@ def test_menu_shows_home_card_with_button_grid(rt, tg):
     linked(rt)
     send(rt, "/menu")
     last = tg.sent[-1]
-    assert "⚡ <b>TradePulse</b>" in last["text"] and "Orders today" in last["text"]
+    assert "⚡ <b>TradePulse</b> · your desk" in last["text"] and "Orders" in last["text"] and "Mathew" in last["text"]
     labels = [b["text"] for b in buttons(last["markup"])]
     for want in ("📊 Positions", "🏦 Holdings", "🧾 Orders", "💹 Trades", "💰 P&L", "📡 Status", "🕒 Recent", "🔄 Refresh"):
         assert want in labels
@@ -122,6 +122,48 @@ def test_group_screens_scoped_to_group(rt, tg):
     assert "NIFTY 26000 CE" in t and "BANKNIFTY" not in t
 
 
+def test_group_desk_is_its_own_accounts_and_modes(rt, tg):
+    """A LIVE-only group: its home lists only its accounts, and paper orders/trades are invisible everywhere."""
+    start_live(rt)
+    rt.sim.order("ZM4521", outcome="fill", instrument=INSTRUMENTS[0])               # LIVE, in the group
+    rt.sim.accounts["J252505"]["mode"] = "PAPER"
+    rt.sim.order("J252505", outcome="fill", instrument=INSTRUMENTS[2])              # PAPER, in the group
+    rt.sim.order("BR77104", outcome="fill", instrument=INSTRUMENTS[1])              # LIVE, not in the group
+    pump(rt)
+    gid, _ = setup_group(rt, ["ZM4521", "J252505"], chat_id=str(GROUP["id"]), name="Live desk")
+    rt.store.execute("UPDATE groups SET modes = ? WHERE id = ?", ('["LIVE"]', gid))
+    anyone = {"id": 5, "first_name": "Anyone"}
+    send(rt, "/menu", chat=GROUP, frm=anyone)
+    home = tg.sent[-1]
+    t = home["text"]
+    assert "👥 <b>Live desk</b>" in t and "LIVE" in t and "your desk" not in t
+    assert "Mathew" in t and "Jayesh" in t and "Bharti" not in t
+    assert "1 order " in t and "1 trade " in t                                       # the paper fill is not counted
+    labels = [b["text"] for b in buttons(home["markup"])]
+    assert any(l.startswith("👤 Mathew") for l in labels) and any(l.startswith("👤 Jayesh") for l in labels)
+    assert "📡 Status" not in labels and "🏦 Holdings" not in labels                # the group desk is not the private one
+    for view, arg in (("ord", "all"), ("trd", "-"), ("rec", "-")):
+        tap(rt, tgui.cb(view, "-", arg), chat=GROUP, frm=anyone)
+        assert "BANKNIFTY" not in tg.edits[-1]["text"], view                           # J252505's paper order
+    tap(rt, tgui.cb("ac", "J252505"), chat=GROUP, frm=anyone)
+    card = tg.edits[-1]["text"]
+    assert "Jayesh" in card and "Orders <b>0</b>" in card and "Trades <b>0</b>" in card
+    tap(rt, tgui.cb("ac", "BR77104"), chat=GROUP, frm=anyone)                        # forged: not this group's account
+    assert "Bharti" not in tg.edits[-1]["text"]
+
+
+def test_private_desk_shows_every_mode_with_a_tag(rt, tg):
+    start_live(rt)
+    rt.sim.accounts["ZM4521"]["mode"] = "PAPER"
+    rt.sim.order("ZM4521", outcome="fill", instrument=INSTRUMENTS[0])
+    pump(rt)
+    linked(rt)
+    tap(rt, tgui.cb("ord", "-", "all"))
+    assert "🧪PAPER" in tg.edits[-1]["text"]
+    tap(rt, tgui.cb("ac", "ZM4521"))
+    assert "Orders <b>1</b>" in tg.edits[-1]["text"]
+
+
 def test_alert_cards_carry_buttons(rt, tg):
     start_live(rt)
     setup_group(rt, ["J252505"])
@@ -130,7 +172,7 @@ def test_alert_cards_carry_buttons(rt, tg):
     rt.notifier.run_once()
     rejected = next(s for s in tg.sent if "Order rejected" in s["text"])
     labels = [b["text"] for b in buttons(rejected["markup"])]
-    assert labels == ["🔍 Order", "📊 Positions", "⚡ Menu"]
+    assert labels == ["🔍 Order", "👤 Account", "⚡ Desk"]
     od = buttons(rejected["markup"])[0]["callback_data"]
     tap(rt, od, chat={"id": -100111, "type": "supergroup", "title": "Desk chat"}, frm={"id": 7, "first_name": "M"})
     assert "Lifecycle" in tg.edits[-1]["text"]

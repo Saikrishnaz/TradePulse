@@ -36,7 +36,7 @@ COMMANDS = [
     ("menu", "⚡ Open the control panel"), ("help", "What I can do"), ("status", "Account status and health"), ("today", "Today's orders, trades and P&L"),
     ("positions", "Open positions"), ("holdings", "Holdings"), ("refresh", "Re-read from broker: /refresh positions|holdings ACCOUNT"), ("orders", "Today's orders"), ("pending", "Pending / working orders"),
     ("rejected", "Rejected orders today"), ("trades", "Executed trades today"), ("pnl", "P&L: /pnl [week|month]"),
-    ("recent", "Recent activity"), ("order", "Order lifecycle: /order <id>"), ("accounts", "Accounts I can show you"),
+    ("recent", "Recent activity"), ("account", "One account at a glance: /account NAME"), ("order", "Order lifecycle: /order <id>"), ("accounts", "Accounts I can show you"),
     ("groups", "Monitoring groups"),
     ("link", "Link your OMS login: /link CODE"), ("whoami", "Who you are to TradePulse"),
 ]
@@ -51,6 +51,7 @@ HELP = """<b>TradePulse</b> – trading monitor for the SkyMatrix OMS
 /orders · /pending · /rejected · /trades
 /pnl [week|month] – P&amp;L
 /recent – recent activity
+/account NAME – one account at a glance
 /order &lt;id&gt; – one order's lifecycle
 /accounts · /groups
 {group_hint}
@@ -250,7 +251,7 @@ class Bot:
         acct_ids = self.svc.resolve_account(scope, arg) if arg and cmd not in ("pnl", "order") else None
         if arg and acct_ids == [] and cmd not in ("pnl", "order"):
             return self.reply(cid, f"No account matching <b>{h(arg)}</b> is available here.")
-        sub = Scope(acct_ids, scope.label) if acct_ids else scope
+        sub = scope.narrow(acct_ids) if acct_ids else scope
         if cmd == "status":
             text = reports.status_text(self.svc, sub)
         elif cmd == "today":
@@ -312,9 +313,8 @@ class Bot:
         if diffs:
             head += f"\n⚠️ {len(diffs)} difference(s) vs the TradePulse book (book → broker):\n" + "\n".join(
                 f"{h(d['symbol'] or d['exchange_token'])} {d['product']}: {d['book_qty']} → {d['broker_qty']}" for d in diffs[:15])
-        sub = Scope(ids, scope.label)
-        body = reports.positions_text(self.svc, sub) if kind == "positions" else reports.holdings_text(self.svc, sub)
-        self.reply(cid, head + "\n\n" + body)
+        text, markup = tgui.render(self.svc, scope, "pos" if kind == "positions" else "hold", ids[0], banner=head)
+        self.reply(cid, text, markup=markup)
 
     def _callback(self, cq: dict) -> None:
         """A button tap: re-check who/where, then re-render the same message in place."""
@@ -336,7 +336,8 @@ class Bot:
         if view == "rk":                                       # refresh from broker: the 3-second slot
             from .brokers import BrokerReadError, Busy
             acct, kind = req["acct"], req["arg"]
-            if not acct or not scope.allows(acct) or kind not in ("positions", "holdings") or self.reconciler is None:
+            if (not acct or acct not in self.svc.book_ids(scope, [acct]) or kind not in ("positions", "holdings")
+                    or self.reconciler is None):
                 return tg.answer_callback_query(cq["id"], "Not available.", show_alert=True)
             try:
                 res = self.reconciler.request(acct, kind, f"tg:{tg_user['telegram_user_id']}")

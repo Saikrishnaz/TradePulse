@@ -78,7 +78,7 @@ def test_group_scope_is_the_groups_accounts_whoever_asks(rt, tg):
     t = tg.texts()[-1]
     assert "NIFTY 26000 CE" in t and "BANKNIFTY" not in t
     msg(rt.bot, STRANGER, GROUP, "/today")                                  # an unlinked member may ask about the group
-    assert "Orders today" in tg.texts()[-1] and "unpriced" in tg.texts()[-1]
+    assert "Group" in tg.texts()[-1] and "unpriced" in tg.texts()[-1] and "Mathew" in tg.texts()[-1]
 
 
 def test_group_queries_can_be_disabled(rt, tg):
