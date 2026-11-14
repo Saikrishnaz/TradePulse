@@ -302,11 +302,23 @@ def pct(now, base) -> str:
         v = (float(now) - float(base)) / float(base) * 100
     except (TypeError, ValueError):
         return ""
-    return f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):.1f}%"
+    if abs(v) < 0.05:
+        return "0.0%"
+    return f"{'+' if v > 0 else '−'}{abs(v):.1f}%"
 
 
 def rupees(v) -> str:
-    return "–" if v is None else f"₹{float(v):,.0f}"
+    """Portfolio-sized amounts the Indian way: ₹1.77 Cr, ₹60.06 L, ₹85,240."""
+    if v is None:
+        return "–"
+    f = float(v)
+    sign = "−" if f < 0 else ""
+    a = abs(f)
+    if a >= 1e7:
+        return f"{sign}₹{a / 1e7:,.2f} Cr"
+    if a >= 1e5:
+        return f"{sign}₹{a / 1e5:,.2f} L"
+    return f"{sign}₹{a:,.0f}"
 
 
 def by_account(rows: list[dict]) -> dict:
