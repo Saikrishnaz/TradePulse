@@ -50,10 +50,22 @@ class TelegramClient:
     def get_me(self) -> dict:
         return self.call("getMe")
 
-    def send_message(self, chat_id, text: str, reply_to: int | None = None) -> dict:
+    def send_message(self, chat_id, text: str, reply_to: int | None = None, reply_markup: dict | None = None) -> dict:
         return self.call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
-                         disable_web_page_preview=True,
+                         disable_web_page_preview=True, reply_markup=reply_markup,
                          reply_parameters={"message_id": reply_to, "allow_sending_without_reply": True} if reply_to else None)
+
+    def edit_message_text(self, chat_id, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+        """Re-render a screen in place (button navigation never adds chat messages)."""
+        return self.call("editMessageText", chat_id=chat_id, message_id=message_id, text=text, parse_mode="HTML",
+                         disable_web_page_preview=True, reply_markup=reply_markup)
+
+    def answer_callback_query(self, callback_id: str, text: str = "", show_alert: bool = False) -> None:
+        """Stops the button's loading spinner; ``show_alert`` shows a pop-up (used for 'please wait N s')."""
+        try:
+            self.call("answerCallbackQuery", callback_query_id=callback_id, text=text[:190] or None, show_alert=show_alert)
+        except TelegramError:
+            pass
 
     def send_chat_action(self, chat_id, action: str = "typing") -> None:
         try:
@@ -63,11 +75,11 @@ class TelegramClient:
 
     def get_updates(self, offset: int | None, timeout: int = 25) -> list[dict]:
         return self.call("getUpdates", _http_timeout=timeout + 10, offset=offset, timeout=timeout,
-                         allowed_updates=["message", "my_chat_member"]) or []
+                         allowed_updates=["message", "my_chat_member", "callback_query"]) or []
 
     def set_webhook(self, url: str, secret_token: str) -> bool:
         return bool(self.call("setWebhook", url=url, secret_token=secret_token,
-                              allowed_updates=["message", "my_chat_member"]))
+                              allowed_updates=["message", "my_chat_member", "callback_query"]))
 
     def delete_webhook(self) -> bool:
         return bool(self.call("deleteWebhook"))

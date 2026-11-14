@@ -36,14 +36,23 @@ class FakeTelegram:
 
     def __init__(self):
         self.sent = []
+        self.edits = []
+        self.answers = []
         self.fail = None
         self.updates = []
 
-    def send_message(self, chat_id, text, reply_to=None):
+    def send_message(self, chat_id, text, reply_to=None, reply_markup=None):
         if self.fail is not None:
             raise self.fail
-        self.sent.append({"chat_id": str(chat_id), "text": text, "reply_to": reply_to})
+        self.sent.append({"chat_id": str(chat_id), "text": text, "reply_to": reply_to, "markup": reply_markup})
         return {"message_id": len(self.sent)}
+
+    def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
+        self.edits.append({"chat_id": str(chat_id), "message_id": message_id, "text": text, "markup": reply_markup})
+        return {"message_id": message_id}
+
+    def answer_callback_query(self, callback_id, text="", show_alert=False):
+        self.answers.append({"id": callback_id, "text": text, "alert": show_alert})
 
     def send_chat_action(self, chat_id, action="typing"):
         pass

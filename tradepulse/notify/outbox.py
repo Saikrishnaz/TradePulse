@@ -69,8 +69,9 @@ class Notifier:
                 tg = self.telegram_factory()
                 if tg is None:
                     raise _Deferred("Telegram bot token not configured")
-                for t in texts:
-                    res = tg.send_message(ch["chat_id"], t)
+                markup = self._markup(rows)
+                for i, t in enumerate(texts):
+                    res = tg.send_message(ch["chat_id"], t, reply_markup=markup if i == len(texts) - 1 else None)
                     ref = str((res or {}).get("message_id") or ref)
                     time.sleep(0.05)
             elif ch["provider"] == "whatsapp":
@@ -98,6 +99,17 @@ class Notifier:
                 self._retry(rows, settings, msg, delay=getattr(ex, "retry_after", None))
         self._health()
         return 0
+
+    def _markup(self, rows: list[dict]) -> dict | None:
+        """Buttons under a card: order/positions for a single event alert, the menu for summaries and batches."""
+        from .. import tgui
+        if len(rows) == 1 and rows[0].get("event_id"):
+            e = self.store.one("SELECT type, account_id, internal_order_id FROM events WHERE event_id = ?", (rows[0]["event_id"],))
+            if e:
+                return tgui.event_keyboard(e)
+        if rows and rows[0].get("kind") == "test":
+            return None
+        return tgui.kb([tgui.btn("⚡ Open menu", "home")])
 
     def _retry(self, rows, settings, error: str, delay=None) -> None:
         max_attempts = int(settings.get("retry_max_attempts") or 8)

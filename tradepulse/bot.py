@@ -25,7 +25,7 @@ from collections import defaultdict, deque
 from datetime import timedelta
 
 from . import bus as busmod
-from . import reports
+from . import reports, tgui
 from .config import IST, ist_iso, now_ist
 from .notify.format import h, split_text
 from .service import Scope
@@ -33,7 +33,7 @@ from .service import Scope
 log = logging.getLogger("tradepulse.bot")
 
 COMMANDS = [
-    ("help", "What I can do"), ("status", "Account status and health"), ("today", "Today's orders, trades and P&L"),
+    ("menu", "⚡ Open the control panel"), ("help", "What I can do"), ("status", "Account status and health"), ("today", "Today's orders, trades and P&L"),
     ("positions", "Open positions"), ("holdings", "Holdings"), ("refresh", "Re-read from broker: /refresh positions|holdings ACCOUNT"), ("orders", "Today's orders"), ("pending", "Pending / working orders"),
     ("rejected", "Rejected orders today"), ("trades", "Executed trades today"), ("pnl", "P&L: /pnl [week|month]"),
     ("recent", "Recent activity"), ("order", "Order lifecycle: /order <id>"), ("accounts", "Accounts I can show you"),
@@ -43,6 +43,7 @@ COMMANDS = [
 
 HELP = """<b>TradePulse</b> – trading monitor for the SkyMatrix OMS
 
+/menu – ⚡ control panel with buttons (start here)
 /status – account status and health
 /today – today's orders, trades and P&amp;L
 /positions – open positions · /holdings – holdings
@@ -77,13 +78,14 @@ class Bot:
     def tg(self):
         return self.telegram_factory()
 
-    def reply(self, chat_id, text: str, reply_to: int | None = None) -> None:
+    def reply(self, chat_id, text: str, reply_to: int | None = None, markup: dict | None = None) -> None:
         tg = self.tg()
         if tg is None:
             return
-        for part in split_text(text):
+        parts = split_text(text)
+        for i, part in enumerate(parts):
             try:
-                tg.send_message(chat_id, part, reply_to=reply_to)
+                tg.send_message(chat_id, part, reply_to=reply_to, reply_markup=markup if i == len(parts) - 1 else None)
                 self.stats["replies"] += 1
             except Exception as ex:
                 self.stats["last_error"] = str(ex)[:200]
@@ -143,6 +145,8 @@ class Bot:
             msg = update.get("message")
             if msg:
                 self._message(msg)
+            if update.get("callback_query"):
+                self._callback(update["callback_query"])
         except Exception as ex:
             self.stats["last_error"] = f"{type(ex).__name__}: {ex}"[:200]
             log.exception("update handling failed")
@@ -197,9 +201,8 @@ class Bot:
     def _command(self, cmd: str, arg: str, chat: dict, tg_user: dict, mid) -> None:
         cid = chat["id"]
         private = chat.get("type") == "private"
-        if cmd in ("start", "help"):
-            return self.reply(cid, HELP.format(group_hint="" if private else
-                                                f"\nIn groups, mention me (@{h(self.username)}) or reply to me to ask."))
+        if cmd == "help":
+            return self.reply(cid, HELP.format(group_hint=""), markup=tgui.kb([tgui.btn("⚡ Open menu", "home")]))
         if cmd == "chatid":
             return self.reply(cid, f"Chat id: <code>{h(cid)}</code>")
         if cmd == "link":
@@ -224,6 +227,24 @@ class Bot:
             return self.reply(cid, "Too many requests - please wait a minute.")
         if cmd == "refresh":
             return self._refresh(arg, chat, tg_user, scope)
+        if cmd in tgui.COMMAND_VIEWS:
+            view, varg = tgui.COMMAND_VIEWS[cmd]
+            acct = None
+            if arg and cmd != "pnl":
+                ids = self.svc.resolve_account(scope, arg)
+                if not ids:
+                    return self.reply(cid, f"No account matching <b>{h(arg)}</b> is available here.")
+                if len(ids) > 1:
+                    text, markup = tgui.render(self.svc, scope, "acc", None, f"{view}.{varg or ''}")
+                    return self.reply(cid, text, markup=markup)
+                acct = ids[0]
+            if cmd == "pnl" and arg.lower() in ("today", "week", "month"):
+                varg = arg.lower()
+            text, markup = tgui.render(self.svc, scope, view, acct, varg)
+            return self.reply(cid, text, markup=markup)
+        if cmd == "order" and arg:
+            text, markup = tgui.render(self.svc, scope, "od", None, arg.strip())
+            return self.reply(cid, text, markup=markup)
         if cmd not in {c for c, _ in COMMANDS}:
             return self.reply(cid, "Unknown command. Send /help for the list.")
         acct_ids = self.svc.resolve_account(scope, arg) if arg and cmd not in ("pnl", "order") else None
@@ -294,6 +315,52 @@ class Bot:
         sub = Scope(ids, scope.label)
         body = reports.positions_text(self.svc, sub) if kind == "positions" else reports.holdings_text(self.svc, sub)
         self.reply(cid, head + "\n\n" + body)
+
+    def _callback(self, cq: dict) -> None:
+        """A button tap: re-check who/where, then re-render the same message in place."""
+        tg = self.tg()
+        if tg is None:
+            return
+        msg = cq.get("message") or {}
+        chat = msg.get("chat") or {}
+        req = tgui.parse_cb(cq.get("data", ""))
+        if not chat or req is None:
+            return tg.answer_callback_query(cq["id"], "This button has expired.")
+        tg_user = self._touch_user(cq.get("from") or {})
+        scope, why = self.chat_scope(chat, tg_user)
+        if scope is None:
+            return tg.answer_callback_query(cq["id"], re.sub(r"<[^>]+>", "", why)[:190], show_alert=True)
+        if self._limited(f"cb{tg_user['telegram_user_id']}", per_min=60):
+            return tg.answer_callback_query(cq["id"], "Too many taps - wait a moment.", show_alert=True)
+        banner, view = "", req["view"]
+        if view == "rk":                                       # refresh from broker: the 3-second slot
+            from .brokers import BrokerReadError, Busy
+            acct, kind = req["acct"], req["arg"]
+            if not acct or not scope.allows(acct) or kind not in ("positions", "holdings") or self.reconciler is None:
+                return tg.answer_callback_query(cq["id"], "Not available.", show_alert=True)
+            try:
+                res = self.reconciler.request(acct, kind, f"tg:{tg_user['telegram_user_id']}")
+            except Busy as b:
+                secs = max(1, -(-b.wait_ms // 1000))
+                return tg.answer_callback_query(cq["id"], f"⏳ Another broker request is in progress.\nPlease wait {secs} "
+                                                          f"second{'s' if secs != 1 else ''} and tap again.", show_alert=True)
+            except BrokerReadError as ex:
+                return tg.answer_callback_query(cq["id"], f"Broker read failed: {ex}"[:190], show_alert=True)
+            diffs = res["mismatches"]
+            banner = (f"✅ <b>{kind.title()} refreshed</b> from the broker" +
+                      (f" · ⚠️ {len(diffs)} difference(s) vs the book" if diffs else " · book matches"))
+            tg.answer_callback_query(cq["id"], "Refreshed ✓")
+            view = "pos" if kind == "positions" else "hold"
+            text, markup = tgui.render(self.svc, scope, view, acct, None, 0, banner=banner)
+        else:
+            text, markup = tgui.render(self.svc, scope, view, req["acct"], req["arg"], req["page"])
+            tg.answer_callback_query(cq["id"])
+        try:
+            tg.edit_message_text(chat["id"], msg["message_id"], text[:4096], reply_markup=markup)
+        except Exception as ex:
+            if "not modified" not in str(ex).lower():          # tapping Update with nothing new is fine
+                log.warning("edit failed: %s", ex)
+                self.reply(chat["id"], text, markup=markup)    # e.g. the message is too old to edit
 
     def _visible_groups(self, scope: Scope) -> list[dict]:
         if scope.group_ids:

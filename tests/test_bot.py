@@ -39,7 +39,7 @@ def test_link_code_single_use_and_scoped_answers(rt, tg):
     assert "invalid or has expired" in tg.texts()[-1]
     msg(rt.bot, MATHEW_TG, PRIVATE(MATHEW_TG), "/positions")
     t = tg.texts()[-1]
-    assert "NIFTY26NOV26000CE" in t and "BANKNIFTY" not in t               # Jayesh's position is invisible
+    assert "NIFTY 26000 CE" in t and "BANKNIFTY" not in t                  # Jayesh's position is invisible
     msg(rt.bot, MATHEW_TG, PRIVATE(MATHEW_TG), "/positions jayesh")
     assert "No account matching" in tg.texts()[-1]
 
@@ -76,9 +76,9 @@ def test_group_scope_is_the_groups_accounts_whoever_asks(rt, tg):
     link(rt, ADMIN_TG, "admin")                                             # even an admin is limited to the group
     msg(rt.bot, ADMIN_TG, GROUP, "/positions")
     t = tg.texts()[-1]
-    assert "NIFTY26NOV26000CE" in t and "BANKNIFTY" not in t
+    assert "NIFTY 26000 CE" in t and "BANKNIFTY" not in t
     msg(rt.bot, STRANGER, GROUP, "/today")                                  # an unlinked member may ask about the group
-    assert "Today's trading" in tg.texts()[-1]
+    assert "Orders today" in tg.texts()[-1] and "unpriced" in tg.texts()[-1]
 
 
 def test_group_queries_can_be_disabled(rt, tg):
