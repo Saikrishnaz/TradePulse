@@ -104,7 +104,8 @@ class Notifier:
         """Buttons under a card: order/positions for a single event alert, the menu for summaries and batches."""
         from .. import tgui
         if len(rows) == 1 and rows[0].get("event_id"):
-            e = self.store.one("SELECT type, account_id, internal_order_id FROM events WHERE event_id = ?", (rows[0]["event_id"],))
+            e = self.store.one("SELECT event_id, type, account_id, internal_order_id FROM events WHERE event_id = ?",
+                               (rows[0]["event_id"],))
             if e:
                 return tgui.event_keyboard(e)
         if rows and rows[0].get("kind") == "test":

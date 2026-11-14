@@ -19,7 +19,7 @@ from .notify.format import broker_name, h, num, pretty_symbol  # noqa: F401 (re-
 from .service import Scope
 
 PAGE = 6
-VIEWS = ("home", "pos", "hold", "ord", "trd", "pnl", "sts", "rec", "ref", "rk", "acc", "od", "ac")
+VIEWS = ("home", "pos", "hold", "ord", "trd", "pnl", "sts", "rec", "ref", "rk", "acc", "od", "ac", "more", "ev", "eo", "ea")
 HOME_ACCOUNTS = 8                                         # account rows/buttons on a group's home screen
 STATUS_ICON = {"COMPLETE": "✅", "PARTIALLY_FILLED": "🟡", "OPEN": "⏳", "SUBMITTING": "⏳", "ROUTED": "⏳", "UNKNOWN": "⚠️",
                "REJECTED": "❌", "FAILED": "❌", "CANCELLED": "🚫", "EXPIRED": "🚫"}
@@ -88,16 +88,30 @@ def kb(*rows) -> dict:
 
 
 def nav_row(view: str, acct: str | None, arg: str | None = None, page: int = 0) -> list:
-    return [btn("⬅️ Home", "home"), btn("↻ Update", view, acct or "-", arg or "-", page)]
+    return [btn("⬅️ Home", "home"), btn("↻", view, acct or "-", arg or "-", page)]
+
+
+def footer(view: str, acct: str | None, scope: Scope, svc, arg: str | None = None, page: int = 0) -> list:
+    """The only always-present row: who is shown (tap to change), Home, Update."""
+    return account_row(view, acct, scope, svc, arg) + nav_row(view, acct, arg, page)
+
+
+def cycle(options, current: str, view: str, acct: str | None, icon: str) -> list:
+    """One button that shows the current choice and moves to the next on tap (replaces a row of chips)."""
+    keys = [k for k, _ in options]
+    cur = current if current in keys else keys[0]
+    nxt = keys[(keys.index(cur) + 1) % len(keys)]
+    label = dict(options)[cur]
+    return [btn(f"{icon} {label} ▸", view, acct or "-", nxt)]
 
 
 def account_row(view: str, acct: str | None, scope: Scope, svc, arg: str | None = None) -> list:
     if len(scope.account_ids) <= 1:
         return []
-    label = "👤 All accounts ▾"
+    label = "👤 All ▾"
     if acct:
         a = svc.oms.account(acct)
-        label = f"👤 {acct_label(a) if a else show_id(acct)} ▾"
+        label = f"👤 {((a or {}).get('client_name') or acct).split(' ')[0]} ▾"
     return [btn(label, "acc", acct or "-", f"{view}.{arg or ''}")]
 
 
@@ -107,10 +121,10 @@ def pager(view: str, acct: str | None, arg: str | None, page: int, total: int) -
         return []
     row = []
     if page > 0:
-        row.append(btn("◀ Prev", view, acct or "-", arg or "-", page - 1))
+        row.append(btn("◀", view, acct or "-", arg or "-", page - 1))
     row.append(btn(f"{page + 1} / {pages}", view, acct or "-", arg or "-", page))
     if page + 1 < pages:
-        row.append(btn("Next ▶", view, acct or "-", arg or "-", page + 1))
+        row.append(btn("▶", view, acct or "-", arg or "-", page + 1))
     return row
 
 
@@ -220,9 +234,7 @@ def group_home(svc, scope: Scope, page=0, **_) -> tuple[str, dict]:
     return "\n".join(lines), kb(
         *acct_rows, more,
         [btn("📊 Positions", "pos"), btn("🧾 Orders", "ord", arg="all")],
-        [btn("💹 Trades", "trd"), btn("💰 P&L", "pnl", arg="today")],
-        [btn("🕒 Activity", "rec"), btn("🔄 Refresh", "ref")],
-        [btn("↻ Update", "home")])
+        [btn("⋯ More", "more"), btn("↻ Update", "home")])
 
 
 def private_home(svc, scope: Scope, **_) -> tuple[str, dict]:
@@ -247,15 +259,12 @@ def private_home(svc, scope: Scope, **_) -> tuple[str, dict]:
         lines += ["", "<b>Today’s movers</b>"]
         lines += [f"{money(r['net'])}  {h(acct_label(r))} · {h(broker_name(r['broker']))}" for r in movers]
     return "\n".join(lines), kb(
-        [btn(f"👤 {acct_label(r)}", "ac", r["account_id"]) for r in movers[:2]],
-        [btn("📊 Positions", "pos"), btn("🏦 Holdings", "hold")],
-        [btn("🧾 Orders", "ord", arg="all"), btn("💹 Trades", "trd")],
-        [btn("💰 P&L", "pnl", arg="today"), btn("📡 Status", "sts")],
-        [btn("👤 Accounts", "acc", "-", "ac."), btn("🕒 Recent", "rec")],
-        [btn("🔄 Refresh", "ref"), btn("↻ Update", "home")])
+        [btn("📊 Positions", "pos"), btn("🧾 Orders", "ord", arg="all")],
+        [btn("👤 Accounts", "acc", "-", "ac."), btn("💰 P&L", "pnl", arg="today")],
+        [btn("⋯ More", "more"), btn("↻ Update", "home")])
 
 
-def account_card(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
+def account_card(svc, scope: Scope, acct=None, page=0, back=None, **_) -> tuple[str, dict]:
     """Everything about one account on one screen, with that account's own buttons."""
     if not acct:
         return account_picker(svc, scope, None, "ac.", page)
@@ -287,12 +296,12 @@ def account_card(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
         e = last[0]
         lines += ["", f"🕒 Last: {ICON.get(e['type'], '•')} {hm(e['occurred_at'])} "
                       f"{h(e['type'].replace('ORDER_', '').replace('_', ' ').title())} · {h(pretty_symbol(e['symbol']))}"]
+    if back:
+        return "\n".join(lines), kb(back)
     return "\n".join(lines), kb(
-        [btn("📊 Positions", "pos", acct), btn("🏦 Holdings", "hold", acct)],
-        [btn("🧾 Orders", "ord", acct, "all"), btn("💹 Trades", "trd", acct)],
-        [btn("💰 P&L", "pnl", acct, "today"), btn("🕒 Activity", "rec", acct)],
-        [btn("🔄 Refresh from broker", "ref", acct)],
-        [btn("⬅️ Home", "home"), btn("↻ Update", "ac", acct)])
+        [btn("📊 Positions", "pos", acct), btn("🧾 Orders", "ord", acct, "all")],
+        [btn("⋯ More", "more", acct), btn("↻ Update", "ac", acct)],
+        [btn("⬅️ Home", "home")])
 
 
 def pct(now, base) -> str:
@@ -384,10 +393,7 @@ def positions(svc, scope: Scope, acct=None, page=0, banner="", **_) -> tuple[str
         lines.append("<blockquote>" + "\n\n".join(cards) + "</blockquote>")
     if not rows:
         lines.append("<i>No open positions.</i>")
-    return "\n".join(lines).strip(), kb(account_row("pos", acct, scope, svc), pager("pos", acct, None, page, len(rows)),
-                                        [btn("🔄 Refresh from broker", "ref", acct or "-")] if acct else [],
-                                        [btn("🏦 Holdings", "hold", acct or "-")] if not scope.is_group else [],
-                                        nav_row("pos", acct, page=page))
+    return "\n".join(lines).strip(), kb(pager("pos", acct, None, page, len(rows)), footer("pos", acct, scope, svc, page=page))
 
 
 def holdings(svc, scope: Scope, acct=None, page=0, banner="", **_) -> tuple[str, dict]:
@@ -442,10 +448,7 @@ def holdings(svc, scope: Scope, acct=None, page=0, banner="", **_) -> tuple[str,
         lines.append("<blockquote>" + "\n\n".join(cards) + "</blockquote>")
     if not rows:
         lines.append("<i>No holdings recorded.</i>")
-    return "\n".join(lines).strip(), kb(account_row("hold", acct, scope, svc), pager("hold", acct, None, page, len(rows)),
-                                        [btn("🔄 Refresh from broker", "ref", acct or "-")] if acct else [],
-                                        [btn("📊 Positions", "pos", acct or "-")] if not scope.is_group else [],
-                                        nav_row("hold", acct, page=page))
+    return "\n".join(lines).strip(), kb(pager("hold", acct, None, page, len(rows)), footer("hold", acct, scope, svc, page=page))
 
 
 def orders(svc, scope: Scope, acct=None, arg=None, page=0, **_) -> tuple[str, dict]:
@@ -459,21 +462,21 @@ def orders(svc, scope: Scope, acct=None, arg=None, page=0, **_) -> tuple[str, di
         lines += [f"{i}. {STATUS_ICON.get(o['status'], '•')} {hm(o['created_at'])}  {side_badge(o['side'], o['ordered_quantity'])} "
                   f"{h(pretty_symbol(o['symbol']))}{mode_tag(scope, o.get('trading_mode'))}",
                   f"   {o['filled_quantity']}/{o['ordered_quantity']} filled"
-                  + (f" @ {num(o['average_price'])}" if o["average_price"] else "") + f" · <i>{h(acct_label(o))}</i>"]
+                  + (f" @ {num(o['average_price'])}" if o["average_price"] else "") + f" · <i>{h(acct_label(o))}</i>",
+                  f"   <code>/order {h(o['broker_order_id'] or o['internal_order_id'])}</code>"]
         if o["status"] in ("REJECTED", "FAILED") and o.get("status_message"):
             lines.append(f"   <i>↳ {h(o['status_message'][:90])}</i>")
         lines.append("")
     if not rows:
         lines.append("<i>No orders match.</i>")
-    chips = [btn(("✓ " if f == flt else "") + label, "ord", acct or "-", f) for f, label, _s in ORDER_FILTERS]
-    details = [btn(f"🔍 {i}", "od", acct or "-", o["internal_order_id"]) for i, o in enumerate(chunk, 1)]
-    return "\n".join(lines).strip(), kb(chips[:2], chips[2:], details[:3], details[3:], account_row("ord", acct, scope, svc, flt),
-                                        pager("ord", acct, flt, page, len(rows)), nav_row("ord", acct, flt, page))
+    pg = pager("ord", acct, flt, page, len(rows))
+    return "\n".join(lines).strip(), kb(cycle([(f, label) for f, label, _s in ORDER_FILTERS], flt, "ord", acct, "Show:") + pg,
+                                        footer("ord", acct, scope, svc, flt, page))
 
 
 def order_detail(svc, scope: Scope, acct=None, arg=None, **_) -> tuple[str, dict]:
     o = svc.oms.order(scope.account_ids, arg or "", modes=scope.modes)
-    back = [btn("⬅️ Orders", "ord", acct or "-", "all"), btn("⬅️ Home", "home"), btn("↻ Update", "od", acct or "-", arg or "-")]
+    back = [btn("⬅️ Orders", "ord", acct or "-", "all"), btn("↻", "od", acct or "-", arg or "-")]
     if not o:
         return "🔍 <b>Order not found</b>\n<i>It is not in the accounts this chat can see.</i>", kb(back)
     icon = STATUS_ICON.get(o["status"], "•")
@@ -502,8 +505,7 @@ def trades(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
                   f"   <i>{h(acct_label(f))}</i>", ""]
     if not rows:
         lines.append("<i>No trades executed today.</i>")
-    return "\n".join(lines).strip(), kb(account_row("trd", acct, scope, svc), pager("trd", acct, None, page, len(rows)),
-                                        nav_row("trd", acct, page=page))
+    return "\n".join(lines).strip(), kb(pager("trd", acct, None, page, len(rows)), footer("trd", acct, scope, svc, page=page))
 
 
 def pnl(svc, scope: Scope, acct=None, arg=None, **_) -> tuple[str, dict]:
@@ -522,8 +524,7 @@ def pnl(svc, scope: Scope, acct=None, arg=None, **_) -> tuple[str, dict]:
                   key=lambda r: r["net"])
     if len(rows) > 1:
         lines += ["", "<b>By account</b>"] + [f"{money(r['net'])}  <i>{h(acct_label(r))}</i>" for r in rows[:10]]
-    chips = [btn(("✓ " if p == period else "") + label, "pnl", acct or "-", p) for p, label in PERIODS]
-    return "\n".join(lines), kb(chips, account_row("pnl", acct, scope, svc, period), nav_row("pnl", acct, period))
+    return "\n".join(lines), kb(cycle(PERIODS, period, "pnl", acct, "📅"), footer("pnl", acct, scope, svc, period))
 
 
 def status(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
@@ -534,9 +535,7 @@ def status(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
         lines += [f"{'🟢' if ok else '🔴'} <b>{h(a['client_name'])}</b> · {h(broker_name(a['broker']))} <code>{h(a['account_id'])}</code>",
                   f"   session {h(a['session_status'])} · worker {h(a['worker_status'] or '–')} · "
                   f"{'monitored' if a['monitored'] else 'not monitored'}", ""]
-    cards = [btn(f"👤 {acct_label(a)}", "ac", a["account_id"]) for a in accts[page * PAGE:(page + 1) * PAGE]]
-    return "\n".join(lines).strip(), kb(*[cards[i:i + 2] for i in range(0, len(cards), 2)],
-                                        pager("sts", acct, None, page, len(accts)), nav_row("sts", acct, page=page))
+    return "\n".join(lines).strip(), kb(pager("sts", acct, None, page, len(accts)), nav_row("sts", acct, page=page))
 
 
 def recent(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
@@ -550,8 +549,7 @@ def recent(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
                   f"   <i>{h(acct_label(r))}</i>", ""]
     if not rows:
         lines.append("<i>No activity yet today.</i>")
-    return "\n".join(lines).strip(), kb(account_row("rec", acct, scope, svc), pager("rec", acct, None, min(page, 9), len(rows)),
-                                        nav_row("rec", acct, page=page))
+    return "\n".join(lines).strip(), kb(pager("rec", acct, None, min(page, 9), len(rows)), footer("rec", acct, scope, svc, page=page))
 
 
 def refresh_menu(svc, scope: Scope, acct=None, page=0, **_) -> tuple[str, dict]:
@@ -613,12 +611,69 @@ def render(svc, scope: Scope, view: str, acct: str | None = None, arg: str | Non
 
 
 def event_keyboard(e: dict) -> dict | None:
-    """Buttons under an alert card posted to a group."""
+    """Buttons under an update card. They open details *in the card* with a "Back to update" button,
+    so the update itself is never lost."""
+    eid = e.get("event_id")
     row = []
-    if e.get("internal_order_id"):
-        row.append(btn("🔍 Order", "od", e.get("account_id") or "-", e["internal_order_id"]))
-    if e.get("account_id"):
-        row.append(btn("👤 Account", "ac", e["account_id"]))
-    row.append(btn("⚡ Desk", "home"))
-    return kb(row)
+    if eid and e.get("internal_order_id"):
+        row.append(btn("🔍 Order details", "eo", "-", eid))
+    if eid and e.get("account_id"):
+        row.append(btn("👤 Account", "ea", "-", eid))
+    return kb(row) if row else None
 
+
+def _event(svc, scope: Scope, eid: str | None) -> dict | None:
+    e = svc.event(scope, eid or "") if eid else None
+    return e if e and scope.mode_ok(e.get("trading_mode")) else None
+
+
+GONE = ("<i>This update is no longer available here.</i>", None)
+
+
+def event_card(svc, scope: Scope, arg=None, **_) -> tuple[str, dict]:
+    """The original update card, restored."""
+    from .notify.format import event_text
+    e = _event(svc, scope, arg)
+    if not e:
+        return GONE[0], kb([btn("⚡ Open menu", "home")])
+    return event_text(e), event_keyboard(e) or kb()
+
+
+def _back(eid: str) -> list:
+    return [btn("⬅️ Back to update", "ev", "-", eid)]
+
+
+def event_order(svc, scope: Scope, arg=None, **_) -> tuple[str, dict]:
+    e = _event(svc, scope, arg)
+    if not e or not e.get("internal_order_id"):
+        return GONE[0], kb(_back(arg or "-"))
+    text, _ = order_detail(svc, scope, e["account_id"], e["internal_order_id"])
+    return text, kb(_back(arg))
+
+
+def event_account(svc, scope: Scope, arg=None, **_) -> tuple[str, dict]:
+    e = _event(svc, scope, arg)
+    if not e:
+        return GONE[0], kb(_back(arg or "-"))
+    return account_card(svc, scope, e["account_id"], back=_back(arg))
+
+
+def more_menu(svc, scope: Scope, acct=None, **_) -> tuple[str, dict]:
+    """Everything that is not on the main screen, one tap away."""
+    if acct:
+        a = svc.oms.account(acct) or {"account_id": acct, "client_name": ""}
+        return (f"⋯ <b>More</b> · {h(acct_label(a))}", kb(
+            [btn("🏦 Holdings", "hold", acct), btn("💹 Trades", "trd", acct)],
+            [btn("💰 P&L", "pnl", acct, "today"), btn("🕒 Activity", "rec", acct)],
+            [btn("🔄 Refresh from broker", "ref", acct)],
+            [btn("⬅️ Back", "ac", acct)]))
+    rows = [[btn("💹 Trades", "trd"), btn("🏦 Holdings", "hold")]]
+    if scope.is_group:
+        rows += [[btn("💰 P&L", "pnl", arg="today"), btn("🕒 Activity", "rec")]]
+    else:
+        rows += [[btn("📡 Status", "sts"), btn("🕒 Recent", "rec")]]
+    rows += [[btn("🔄 Refresh from broker", "ref")], [btn("⬅️ Back", "home")]]
+    return "⋯ <b>More</b>", kb(*rows)
+
+
+SCREENS.update({"more": more_menu, "ev": event_card, "eo": event_order, "ea": event_account})

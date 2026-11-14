@@ -36,8 +36,11 @@ def test_menu_shows_home_card_with_button_grid(rt, tg):
     last = tg.sent[-1]
     assert "⚡ <b>TradePulse</b> · your desk" in last["text"] and "Orders" in last["text"] and "Mathew" in last["text"]
     labels = [b["text"] for b in buttons(last["markup"])]
-    for want in ("📊 Positions", "🏦 Holdings", "🧾 Orders", "💹 Trades", "💰 P&L", "📡 Status", "🕒 Recent", "🔄 Refresh"):
-        assert want in labels
+    assert labels == ["📊 Positions", "🧾 Orders", "👤 Accounts", "💰 P&L", "⋯ More", "↻ Update"]   # few buttons
+    tap(rt, tgui.cb("more"))
+    more = [b["text"] for b in buttons(tg.edits[-1]["markup"])]
+    for want in ("💹 Trades", "🏦 Holdings", "📡 Status", "🕒 Recent", "🔄 Refresh from broker", "⬅️ Back"):
+        assert want in more
     assert all(len(b["callback_data"].encode()) <= 64 for b in buttons(last["markup"]))
 
 
@@ -67,9 +70,10 @@ def test_orders_chips_and_order_drilldown(rt, tg):
     e = tg.edits[-1]
     assert "❌" in e["text"] and "insufficient margin" in e["text"]
     labels = [b["text"] for b in buttons(e["markup"])]
-    assert "✓ ❌ Rejected" in labels and "🔍 1" in labels
-    detail = next(b for b in buttons(e["markup"]) if b["text"] == "🔍 1")
-    tap(rt, detail["callback_data"])
+    assert "Show: ❌ Rejected ▸" in labels and len(buttons(e["markup"])) <= 5        # one filter button, one footer row
+    assert "/order " in e["text"]                                                    # tap-to-copy order command
+    oid = rt.store.one("SELECT internal_order_id FROM orders WHERE status = 'REJECTED'")["internal_order_id"]
+    tap(rt, tgui.cb("od", arg=oid))
     d = tg.edits[-1]["text"]
     assert "Order rejected" in d or "Rejected" in d
     assert "<b>Lifecycle</b>" in d and "<blockquote expandable>" in d
@@ -173,10 +177,17 @@ def test_alert_cards_carry_buttons(rt, tg):
     rt.notifier.run_once()
     rejected = next(s for s in tg.sent if "Order rejected" in s["text"])
     labels = [b["text"] for b in buttons(rejected["markup"])]
-    assert labels == ["🔍 Order", "👤 Account", "⚡ Desk"]
+    assert labels == ["🔍 Order details", "👤 Account"]
+    grp, who = {"id": -100111, "type": "supergroup", "title": "Desk chat"}, {"id": 7, "first_name": "M"}
     od = buttons(rejected["markup"])[0]["callback_data"]
-    tap(rt, od, chat={"id": -100111, "type": "supergroup", "title": "Desk chat"}, frm={"id": 7, "first_name": "M"})
+    tap(rt, od, chat=grp, frm=who)
     assert "Lifecycle" in tg.edits[-1]["text"]
+    back = [b for b in buttons(tg.edits[-1]["markup"])]
+    assert [b["text"] for b in back] == ["⬅️ Back to update"]                      # the update is never lost
+    tap(rt, back[0]["callback_data"], chat=grp, frm=who)
+    assert tg.edits[-1]["text"] == rejected["text"]                                 # original card restored
+    tap(rt, buttons(rejected["markup"])[1]["callback_data"], chat=grp, frm=who)
+    assert "Jayesh" in tg.edits[-1]["text"] and [b["text"] for b in buttons(tg.edits[-1]["markup"])] == ["⬅️ Back to update"]
 
 
 def test_every_screen_renders_for_a_busy_account(rt, tg):
@@ -191,7 +202,10 @@ def test_every_screen_renders_for_a_busy_account(rt, tg):
         assert text and len(text) < 4096 and markup["inline_keyboard"], view
         assert all(len(b["callback_data"].encode()) <= 64 for b in buttons(markup)), view
     text, markup = tgui.render(rt.svc, scope, "ord", "ZM4521", "all", 1)          # page 2 exists
-    assert any(b["text"].startswith("◀ Prev") for b in buttons(markup))
+    assert any(b["text"] == "▶" or b["text"] == "◀" for b in buttons(markup))
+    for view, arg in (("pos", None), ("ord", "all"), ("trd", None), ("pnl", "week"), ("rec", None)):
+        _t, markup = tgui.render(rt.svc, scope, view, None, arg)
+        assert len(markup["inline_keyboard"]) <= 2, view                              # every list: ≤ 2 rows of buttons
 
 
 def test_pretty_symbols():
