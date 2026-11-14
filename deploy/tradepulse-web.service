@@ -9,8 +9,9 @@ User=tradepulse
 WorkingDirectory=/opt/tradepulse
 EnvironmentFile=/opt/tradepulse/.env
 # Workers run in tradepulse-worker.service; this process serves the UI/API/SSE/webhooks only.
-Environment=TP_RUN_WORKERS=0
-ExecStart=/opt/tradepulse/venv/bin/python -m tradepulse.app
+# Forced on the command line: EnvironmentFile (.env, which may say TP_RUN_WORKERS=1) would override
+# an Environment= line, and running the workers twice means two stream readers / reconcilers / bots.
+ExecStart=/usr/bin/env TP_RUN_WORKERS=0 /opt/tradepulse/venv/bin/python -m tradepulse.app
 Restart=always
 RestartSec=3
 # Hardening: TradePulse writes only its own data dir. It needs NO access to the OMS host or files.
