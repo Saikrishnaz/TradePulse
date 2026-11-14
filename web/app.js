@@ -862,7 +862,7 @@ PAGES.accounts = async (root) => {
 function groupBody(g, over = {}) {
   return { name: g.name, description: g.description, enabled: !!g.enabled, color: g.color, delivery_mode: g.delivery_mode, batch_minutes: g.batch_minutes,
     digest_interval_min: g.digest_interval_min, digest_times: g.digest_times, position_interval_min: g.position_interval_min, eod_summary: !!g.eod_summary,
-    allow_queries: !!g.allow_queries, account_ids: g.account_ids, channel_ids: g.channels.map((c) => c.id), rules: g.rules, ...over };
+    allow_queries: !!g.allow_queries, account_ids: g.account_ids, channel_ids: g.channels.map((c) => c.id), rules: g.rules, modes: g.modes || [], ...over };
 }
 
 /* account drawer */
@@ -930,6 +930,7 @@ PAGES.groups = async (root) => {
           <div class="actions">${g.enabled ? badge("ACTIVE", "Enabled") : badge("", "Paused")}</div></div>
         <div class="card-b stack">${g.description ? `<div class="text-2">${esc(g.description)}</div>` : ""}
           <dl class="kv"><dt>Accounts</dt><dd>${g.account_ids.length}</dd><dt>Chats</dt><dd>${g.channels.map((c) => `${esc(c.title || c.chat_id)} ${c.status !== "ACTIVE" ? badge(c.status) : ""}`).join(", ") || '<span class="down">none – nothing will be sent</span>'}</dd>
+          <dt>Trading modes</dt><dd>${(g.modes && g.modes.length) ? g.modes.map((m) => `<span class="badge ${m === "LIVE" ? "up" : "violet"}">${esc(m)}</span>`).join(" ") : '<span class="muted">global setting</span>'}</dd>
           <dt>Delivery</dt><dd>${g.delivery_mode === "batched" ? `Batched every ${g.batch_minutes} min` : "Instant"}</dd>
           <dt>Reports</dt><dd>${[g.digest_interval_min ? `summary every ${g.digest_interval_min}m` : "", g.digest_times.length ? `at ${g.digest_times.join(", ")}` : "", g.position_interval_min ? `positions every ${g.position_interval_min}m` : "", g.eod_summary ? "EOD summary" : ""].filter(Boolean).join(" · ") || "none"}</dd>
           <dt>Questions</dt><dd>${g.allow_queries ? "Members may ask the bot" : "Off"}</dd><dt>Rule overrides</dt><dd>${Object.keys(g.rules).length}</dd></dl>
@@ -950,7 +951,7 @@ PAGES.groups = async (root) => {
 };
 async function editGroup(g, chats, done) {
   const accts = await allAccounts();
-  const nm = g ? groupBody(g) : { name: "", description: "", enabled: true, color: "#4c8dff", delivery_mode: "instant", batch_minutes: 5, digest_interval_min: 0, digest_times: [], position_interval_min: 0, eod_summary: true, allow_queries: true, account_ids: [], channel_ids: [], rules: {} };
+  const nm = g ? groupBody(g) : { name: "", description: "", enabled: true, color: "#4c8dff", delivery_mode: "instant", batch_minutes: 5, digest_interval_min: 0, digest_times: [], position_interval_min: 0, eod_summary: true, allow_queries: true, account_ids: [], channel_ids: [], rules: {}, modes: ["LIVE"] };
   const sel = new Set(nm.account_ids), chs = new Set(nm.channel_ids);
   const byClient = {};
   accts.forEach((a) => (byClient[a.client_name] = byClient[a.client_name] || []).push(a));
@@ -971,6 +972,8 @@ async function editGroup(g, chats, done) {
     <div class="grid g-2">
       <div class="card"><div class="card-h"><h3>Delivery</h3></div><div class="card-b stack">
         <div class="seg" role="group" aria-label="Delivery mode"><button type="button" data-dm="instant" aria-pressed="${nm.delivery_mode === "instant"}">Instant</button><button type="button" data-dm="batched" aria-pressed="${nm.delivery_mode === "batched"}">Batched</button></div>
+        <div class="field"><span class="label">Trading modes sent to this group</span><div class="row">${["LIVE", "PAPER", "DRY_RUN"].map((md) => `<label class="row" style="gap:6px"><input type="checkbox" class="check" data-gmode="${md}" ${(nm.modes || []).includes(md) ? "checked" : ""}> ${md === "LIVE" ? "LIVE (real)" : md}</label>`).join("")}</div>
+          <span class="hint">None ticked = follow the global setting (Notifications page). A “live trades” group should tick LIVE only.</span></div>
         <div class="field"><label for="gBatch">Batch window (minutes)</label><input class="input" type="number" min="1" max="240" id="gBatch" value="${nm.batch_minutes}"><span class="hint">Batched: updates are combined into one message per window.</span></div></div></div>
       <div class="card"><div class="card-h"><h3>Reporting schedule</h3><span class="sub">IST, trading days</span></div><div class="card-b grid g-2">
         <div class="field"><label for="gDig">Summary every (min)</label><input class="input" type="number" min="0" max="1440" id="gDig" value="${nm.digest_interval_min}"><span class="hint">0 = off · market hours only</span></div>
@@ -1004,7 +1007,8 @@ async function editGroup(g, chats, done) {
     if (!name || badT) return;
     const body = { name, description: $("#gDesc", el).value, enabled: $("#gEnabled", el).checked, color: $("#gColor", el).value, delivery_mode: dm,
       batch_minutes: +$("#gBatch", el).value || 5, digest_interval_min: +$("#gDig", el).value || 0, digest_times: times, position_interval_min: +$("#gPos", el).value || 0,
-      eod_summary: $("#gEod", el).checked, allow_queries: $("#gQueries", el).checked, account_ids: [...sel], channel_ids: [...chs], rules: readTri($("#gRules", el)) };
+      eod_summary: $("#gEod", el).checked, allow_queries: $("#gQueries", el).checked, account_ids: [...sel], channel_ids: [...chs], rules: readTri($("#gRules", el)),
+      modes: $$("[data-gmode]", el).filter((x) => x.checked).map((x) => x.dataset.gmode) };
     await busy(e.currentTarget, () => api(g ? "PUT" : "POST", g ? `/api/groups/${g.id}` : "/api/groups", body));
     toast(g ? "Group saved" : "Group created", "ok"); state.clients = null; m.close(); done();
   });

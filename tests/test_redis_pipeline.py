@@ -152,6 +152,33 @@ def test_only_monitored_accounts_in_groups_notify(rt):
     assert accts == {"ZM4521"} and "ORDER_REJECTED" in types_for(rt, "J252505")
 
 
+def test_live_only_group_never_gets_paper_trades(rt):
+    """The user's 'live trade' group received PAPER trades: a group can now be LIVE only."""
+    import json as _json
+    start_live(rt)
+    gid, _ = setup_group(rt, ["J252505"])
+    rt.store.execute("UPDATE groups SET modes = ? WHERE id = ?", (_json.dumps(["LIVE"]), gid))
+    rt.processor.invalidate()
+    rt.sim.accounts["J252505"]["mode"] = "PAPER"
+    rt.sim.order("J252505", outcome="reject")
+    pump(rt)
+    assert notifs(rt) == []                                                      # paper: stored + shown, not sent
+    assert "ORDER_REJECTED" in types_for(rt, "J252505")
+    rt.sim.accounts["J252505"]["mode"] = "LIVE"
+    rt.sim.order("J252505", outcome="reject")
+    pump(rt)
+    assert [n["type"] for n in notifs(rt)] == ["ORDER_PLACED", "ORDER_REJECTED"]
+
+
+def test_group_modes_api_validation(rt, client):
+    from conftest import H, login
+    login(client, "admin", "admin123")
+    body = {"name": "Live trades", "account_ids": ["J252505"], "modes": ["live"]}
+    g = client.post("/api/groups", json=body, headers=H).json()
+    assert g["modes"] == ["LIVE"]
+    assert client.post("/api/groups", json={**body, "name": "x", "modes": ["REAL"]}, headers=H).status_code == 422
+
+
 def test_unacked_ingest_is_reclaimed(rt):
     rt.bus.ensure_group(busmod.INGEST, busmod.INGEST_GROUP)
     enqueue(rt.bus, ev.new_event(ev.ORDER_REJECTED, "TEST", "k1", account_id="ZM4521"))

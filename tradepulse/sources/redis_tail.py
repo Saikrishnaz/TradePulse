@@ -311,6 +311,12 @@ class RedisTail:
         elif msg_type in ("POSITION_BOOK", "HOLDINGS") and account:
             if d.get("error"):
                 return
+            # The OMS publishes a book per trading mode. Only the LIVE book is the broker's real book; a PAPER
+            # book of a real broker account must never become its baseline (it caused false mismatches).
+            broker = (self.store.one("SELECT broker FROM accounts WHERE account_id = ?", (account,)) or {}).get("broker", "")
+            mode = str(d.get("trading_mode") or "LIVE").upper()
+            if (str(broker).lower() == "paper") != (mode == "PAPER"):
+                return
             kind = "positions" if msg_type == "POSITION_BOOK" else "holdings"
             rows = [self._norm_snapshot_row(r, kind) for r in (d.get(kind if kind == "holdings" else "positions") or [])]
             self.keeper.apply_snapshot(account, kind, rows, "OMS_WORKER", at=at, compare=not backfill)

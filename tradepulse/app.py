@@ -115,6 +115,16 @@ class GroupIn(BaseModel):
     account_ids: list[str] = Field(default_factory=list, max_length=2000)
     channel_ids: list[int] = Field(default_factory=list, max_length=200)
     rules: dict[str, bool | None] = Field(default_factory=dict)
+    modes: list[str] = Field(default_factory=list, max_length=3)      # [] = follow the global setting
+
+    @field_validator("modes")
+    @classmethod
+    def _modes(cls, v):
+        v = sorted({str(m).upper() for m in v})
+        bad = [m for m in v if m not in ("LIVE", "PAPER", "DRY_RUN")]
+        if bad:
+            raise ValueError(f"unknown trading mode(s): {', '.join(bad)}")
+        return v
 
     @field_validator("digest_times")
     @classmethod
@@ -456,18 +466,18 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
             with rt.store.tx() as c:
                 vals = (body.name.strip(), body.description, int(body.enabled), body.color, body.delivery_mode,
                         body.batch_minutes, body.digest_interval_min, json.dumps(body.digest_times),
-                        body.position_interval_min, int(body.eod_summary), int(body.allow_queries))
+                        body.position_interval_min, int(body.eod_summary), int(body.allow_queries), json.dumps(body.modes))
                 if group_id is None:
                     group_id = c.execute("""INSERT INTO groups (name, description, enabled, color, delivery_mode,
                         batch_minutes, digest_interval_min, digest_times, position_interval_min, eod_summary,
-                        allow_queries, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        allow_queries, modes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                          (*vals, now, now)).lastrowid
                 else:
                     if not c.execute("SELECT 1 FROM groups WHERE id = ?", (group_id,)).fetchone():
                         raise HTTPException(404, "Group not found")
                     c.execute("""UPDATE groups SET name=?, description=?, enabled=?, color=?, delivery_mode=?,
                         batch_minutes=?, digest_interval_min=?, digest_times=?, position_interval_min=?, eod_summary=?,
-                        allow_queries=?, updated_at=? WHERE id=?""", (*vals, now, group_id))
+                        allow_queries=?, modes=?, updated_at=? WHERE id=?""", (*vals, now, group_id))
                 c.execute("DELETE FROM group_accounts WHERE group_id = ?", (group_id,))
                 c.executemany("INSERT INTO group_accounts (group_id, account_id) VALUES (?, ?)",
                               [(group_id, a) for a in sorted(set(body.account_ids))])

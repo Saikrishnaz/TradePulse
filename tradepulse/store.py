@@ -436,6 +436,9 @@ class Store:
             cols = {r[1] for r in c.execute("PRAGMA table_info(book_positions)")}
             if "cost_known" not in cols:
                 c.execute("ALTER TABLE book_positions ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 1")
+            if "modes" not in {r[1] for r in c.execute("PRAGMA table_info(groups)")}:
+                # Trading modes this group is notified about (JSON list); empty = the global setting.
+                c.execute("ALTER TABLE groups ADD COLUMN modes TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def conn(self):
@@ -541,6 +544,10 @@ class Store:
         ch = self.rows("SELECT gc.group_id, c.* FROM group_channels gc JOIN channels c ON c.id = gc.channel_id")
         for g in gs:
             g["digest_times"] = json.loads(g["digest_times"] or "[]")
+            try:
+                g["modes"] = json.loads(g.get("modes") or "[]")
+            except ValueError:
+                g["modes"] = []
             g["account_ids"] = [a["account_id"] for a in acc if a["group_id"] == g["id"]]
             g["channels"] = [{k: c[k] for k in ("id", "kind", "chat_id", "title", "chat_type", "enabled", "status")}
                              for c in ch if c["group_id"] == g["id"]]

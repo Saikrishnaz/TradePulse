@@ -75,11 +75,15 @@ def targets(snap: RuleSnapshot, event: dict) -> list[dict]:
     if not mon or not mon.get("enabled") or mon.get("muted"):
         return []
     mode = (event.get("trading_mode") or "").upper()
-    if mode and mode not in [m.upper() for m in snap.settings.get("notify_modes", [])]:
-        return []
+    global_modes = [m.upper() for m in snap.settings.get("notify_modes", [])]
     out, seen = [], set()
     for g in snap.groups:
         if not g["enabled"] or account_id not in g["account_ids"]:
+            continue
+        # Trading-mode filter: the group's own choice ("Live trades" group = LIVE only), else the global one.
+        # Events without a mode (alerts, reconcile mismatches) are not filtered.
+        modes = [m.upper() for m in (g.get("modes") or [])] or global_modes
+        if mode and mode not in modes:
             continue
         ok, _lvl = event_enabled(snap, event["type"], account_id, g["id"])
         if not ok:

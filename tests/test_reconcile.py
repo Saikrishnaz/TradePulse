@@ -209,6 +209,53 @@ def test_unknown_cost_uses_broker_pnl_never_avg_zero(rt, brokers, fast_slot):
     assert apply_fill(p, "BUY", 225, "141.00") == "CLOSED" and p["cost_known"] == 1
 
 
+def _paper_mode(rt, account):
+    rt.sim.accounts[account]["mode"] = "PAPER"           # the OMS runs this real broker account in PAPER
+
+
+def test_paper_fills_never_touch_the_real_broker_book(rt, brokers, fast_slot):
+    """Production bug (J252505): a PAPER buy on a real Angel account became a real position + holding alert."""
+    start_live(rt)
+    rt.store.set_monitoring(["J252505"], True, "t")
+    brokers.set("J252505", positions=[], holdings=[{"exchange": "NSE", "token": 1594, "symbol": "INFY-EQ", "qty": 2, "avg": 1500.0}])
+    rt.reconciler.run("SCHEDULED 09:00")
+    _paper_mode(rt, "J252505")
+    rt.sim.order("J252505", outcome="fill", instrument=RELIANCE, lots=1)        # PAPER fill
+    pump(rt)
+    assert rt.oms.positions(["J252505"], "open") == []
+    assert [h["symbol"] for h in rt.oms.holdings(["J252505"])] == ["INFY-EQ"]
+    types = [r["type"] for r in rt.store.rows("SELECT type FROM events")]
+    assert "TRADE_EXECUTED" in types                                             # the paper trade is still visible
+    assert "POSITION_UPDATED" not in types and "HOLDING_UPDATED" not in types
+    rt.sim.accounts["J252505"]["mode"] = "LIVE"
+    rt.sim.order("J252505", outcome="fill", instrument=RELIANCE, lots=1)        # LIVE fill does move it
+    pump(rt)
+    assert rt.oms.positions(["J252505"], "open")[0]["net_quantity"] == 1
+
+
+def test_oms_paper_book_is_not_used_as_the_broker_baseline(rt, brokers):
+    """Production bug: the OMS's PAPER POSITION_BOOK became the Angel baseline -> false mismatch alerts."""
+    start_live(rt)
+    _paper_mode(rt, "J252505")
+    rt.sim.position_book("J252505", [{"exchange": "NFO", "exchange_token": 64462, "product": "NRML", "net_quantity": -650,
+                                      "broker_symbol": "NIFTY23NOV2625400CE", "average_price": 100.0}])
+    pump(rt)
+    assert rt.oms.positions(["J252505"], "open") == []
+    assert rt.store.rows("SELECT * FROM reconcile_diffs") == []
+    rt.sim.accounts["J252505"]["mode"] = "LIVE"
+    rt.sim.position_book("J252505", [{"exchange": "NSE", "exchange_token": 1594, "product": "CNC", "net_quantity": 3,
+                                      "broker_symbol": "INFY-EQ", "average_price": 1500.0}])
+    pump(rt)
+    assert rt.oms.positions(["J252505"], "open")[0]["net_quantity"] == 3     # the LIVE book is used
+
+
+def test_paper_broker_account_follows_paper_fills(rt, brokers, fast_slot):
+    start_live(rt)
+    rt.sim.order("BRP0091", outcome="fill", instrument=RELIANCE, lots=2)        # broker = paper, mode PAPER
+    pump(rt)
+    assert rt.oms.positions(["BRP0091"], "open")[0]["net_quantity"] == 2
+
+
 def test_all_three_brokers_parse(rt, brokers, fast_slot):
     for acct in ("ZM4521", "AM88213", "KS50310"):
         brokers.set(acct, positions=[{"exchange": "NFO", "token": 56723, "product": "NRML", "qty": -75, "symbol": "NIFTY26NOV26000CE", "avg": 100.0}],

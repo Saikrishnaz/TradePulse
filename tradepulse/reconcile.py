@@ -50,10 +50,17 @@ class BookKeeper:
         never as strings, whose precision/offset formats differ. With no baseline: today's fills."""
         cutoff = parse_ts(since) or parse_ts(f"{today_ist()}T00:00:00+05:30")
         day_start = (cutoff.astimezone(IST).date().isoformat())
-        rows = self.store.rows("""SELECT f.*, COALESCE(o.instrument_class, '') AS instrument_class FROM fills f
+        # The book mirrors the account's REAL broker book, so only LIVE fills move it. A PAPER/DRY_RUN order
+        # on a real broker account never reaches the broker. Accounts whose broker IS paper follow paper fills.
+        acct = self.store.one("SELECT broker FROM accounts WHERE account_id = ?", (account_id,)) or {}
+        paper_account = str(acct.get("broker") or "").lower() == "paper"
+        rows = self.store.rows("""SELECT f.*, COALESCE(o.instrument_class, '') AS instrument_class,
+                                         COALESCE(o.trading_mode, '') AS trading_mode FROM fills f
                                     LEFT JOIN orders o ON o.internal_order_id = f.internal_order_id
                                    WHERE f.account_id = ? AND substr(f.filled_at, 1, 10) >= ? AND f.exchange != ''""",
                                (account_id, day_start))
+        if not paper_account:
+            rows = [r for r in rows if r["trading_mode"] in ("LIVE", "")]
         out = [r for r in rows if (parse_ts(r["filled_at"]) or cutoff) > cutoff]
         out.sort(key=lambda r: (parse_ts(r["filled_at"]), r["id"]))
         return out
