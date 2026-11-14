@@ -853,22 +853,34 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
         changed(u, "SETTINGS_UPDATED", "", clean)
         return {"values": rt.store.get_settings()}
 
+    def _live(name: str, local: dict, comps: dict | None = None) -> dict:
+        """Status of a background component. In production the workers run in tradepulse-worker, so this
+        process's own counters are idle; the worker publishes its real status to the Redis health hash."""
+        if run_workers:
+            return local
+        comps = comps if comps is not None else {k: _safe_json(v) for k, v in rt.bus.hgetall(busmod.HEALTH).items()}
+        return comps.get(name) or {k: (v if isinstance(v, str) else None) for k, v in local.items()}
+
     @app.get("/api/system/health")
     def system_health(u: dict = Depends(user)):
         comps = {k: _safe_json(v) for k, v in rt.bus.hgetall(busmod.HEALTH).items()}
         q = {r["status"]: r["n"] for r in rt.store.rows("SELECT status, COUNT(*) AS n FROM notifications GROUP BY status")}
+        tail = _live("redis_tail", rt.tail.stats, comps)
         out = {
             "version": __version__, "at": ist_iso(),
             "redis": {"kind": rt.bus.kind, "ok": rt.bus.ping()},
             "oms_link": "redis-only",
             "ingest": {"pending": rt.bus.pending_count(busmod.INGEST, busmod.INGEST_GROUP),
                        "length": rt.bus.length(busmod.INGEST)},
-            "processor": rt.processor.stats, "redis_tail": rt.tail.stats, "notifier": rt.notifier.stats,
+            "processor": {"processed": 0, "duplicates": 0, "failed": 0, **_live("processor", rt.processor.stats, comps)},
+            "redis_tail": {"messages": 0, "streams": 0, "roster_accounts": 0, "errors": 0, **tail},
+            "notifier": _live("notifier", rt.notifier.stats, comps),
             "brokers": {**rt.readers.stats, "slot_seconds": rt.readers.slot_ms() // 1000},
-            "reconcile": {"running": rt.reconciler.current,
+            "reconcile": {"running": rt.reconciler.current or (comps.get("reconciler") or {}).get("running"),
                           "last": rt.store.one("SELECT * FROM reconcile_runs ORDER BY id DESC LIMIT 1"),
                           "times": rt.store.setting("reconcile_times")},
-            "notifications": q, "telegram": rt.bot.stats, "assistant": {"engine": rt.assistant.engine},
+            "notifications": q, "assistant": {"engine": rt.assistant.engine},
+            "telegram": {"updates": 0, "replies": 0, **_live("telegram_bot", rt.bot.stats, comps)},
             "vault": {"generated_key": rt.vault.generated_key}, "components": comps,
             "cursors": {r["name"]: r["value"] for r in rt.store.rows("SELECT * FROM cursors")} if u["role"] == "ADMIN" else {},
             "no_broker_polling": True,
@@ -876,13 +888,13 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
         return out
 
     def _health_brief() -> dict:
-        tail = rt.tail.stats
+        tail = _live("redis_tail", rt.tail.stats)
         return {"oms_stream": bool(tail.get("redis_ok")), "oms_last_message": tail.get("last_message_at"),
                 "redis": rt.bus.kind == "redis" and rt.bus.ping(),
                 "reconcile": rt.store.one("SELECT trigger, status, finished_at, mismatches FROM reconcile_runs "
                                           "WHERE trigger LIKE 'SCHEDULED%' ORDER BY id DESC LIMIT 1"),
                 "telegram": bool(rt.bot_token()), "bot_ok": (_health_component("telegram_bot") or {}).get("ok"),
-                "last_tick": rt.tail.stats.get("last_tick"), "queue": rt.store.one(
+                "last_tick": tail.get("last_tick"), "queue": rt.store.one(
                     "SELECT COUNT(*) AS n FROM notifications WHERE status IN ('QUEUED','FAILED')")["n"],
                 "dead": rt.store.one("SELECT COUNT(*) AS n FROM notifications WHERE status = 'DEAD'")["n"],
                 "assistant": rt.assistant.engine}
@@ -904,7 +916,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
     @app.get("/api/reconcile")
     def reconcile_status(sc: Scope = Depends(scope)):
         out = rt.svc.reconcile_status(sc)
-        out["running"] = rt.reconciler.current
+        out["running"] = rt.reconciler.current or (_health_component("reconciler") or {}).get("running")
         out["slot_seconds"] = rt.readers.slot_ms() // 1000
         out["times"] = rt.store.setting("reconcile_times")
         return out

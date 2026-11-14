@@ -191,6 +191,29 @@ def test_link_code_flow_api(client):
     assert len(r["code"]) == 14 and r["expires_at"]
 
 
+def test_health_reads_worker_status_when_workers_run_elsewhere(rt):
+    """Production layout: the web process runs no workers; its health must show the worker's published status."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from tradepulse import bus as busmod
+    from tradepulse.app import create_app
+    rt.bus.hset(busmod.HEALTH, "redis_tail", json.dumps({"messages": 20005, "streams": 13, "roster_accounts": 13,
+                                                          "errors": 0, "redis_ok": True, "last_message_at": "2026-11-14T09:03:30+05:30"}))
+    rt.bus.hset(busmod.HEALTH, "telegram_bot", json.dumps({"username": "TradePulseBot", "updates": 4, "replies": 3, "ok": True}))
+    rt.bus.hset(busmod.HEALTH, "reconciler", json.dumps({"running": {"trigger": "SCHEDULED 09:00", "done": 3, "total": 10}}))
+    rt.settings.RUN_WORKERS = False
+    with TestClient(create_app(rt.settings, rt, start_workers=False)) as c:
+        login(c, "admin", "admin123")
+        h = c.get("/api/system/health").json()
+        assert h["redis_tail"]["messages"] == 20005 and h["redis_tail"]["roster_accounts"] == 13
+        assert h["telegram"]["username"] == "TradePulseBot"
+        assert h["reconcile"]["running"]["done"] == 3
+        assert c.get("/api/overview").json()["health"]["oms_stream"] is True
+        assert c.get("/api/reconcile").json()["running"]["total"] == 10
+
+
 def test_security_headers(client):
     r = client.get("/api/health")
     assert r.headers["x-content-type-options"] == "nosniff" and "frame-ancestors 'none'" in r.headers["content-security-policy"]

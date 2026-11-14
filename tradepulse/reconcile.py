@@ -216,6 +216,7 @@ class Reconciler:
                         self.keeper.record_failure(a["account_id"], kind, f"BROKER {trigger}", str(ex), run_id)
                         log.warning("reconcile %s %s %s: %s", trigger, a["account_id"], kind, ex)
                     self.current["done"] += 1
+                    self._publish()
             status = "DONE" if not stats["errors"] else ("PARTIAL" if stats["snapshots"] else "FAILED")
             self.store.execute("""UPDATE reconcile_runs SET status = ?, requests = ?, snapshots = ?, errors = ?, mismatches = ?,
                                   finished_at = ? WHERE id = ?""",
@@ -223,6 +224,7 @@ class Reconciler:
             return {"run_id": run_id, "status": status, **stats}
         finally:
             self.current = None
+            self._publish()
             self._run_lock.release()
 
     # --- user request: one account, one kind, one slot ----------------------------------------------------
@@ -279,6 +281,14 @@ class Reconciler:
             results.append(self.run(f"SCHEDULED {t}", stop))
         return results
 
+    def _publish(self) -> None:
+        """Progress for the dashboard, which runs in another process in production."""
+        try:
+            from . import bus as busmod
+            self.bus.hset(busmod.HEALTH, "reconciler", json.dumps({"running": self.current, "at": ist_iso()}, default=str))
+        except Exception:
+            pass
+
     def loop(self, stop: threading.Event) -> None:
         log.info("reconciler started")
         while not stop.is_set():
@@ -286,6 +296,7 @@ class Reconciler:
                 self.run_due(stop)
             except Exception:
                 log.exception("reconcile loop error")
+            self._publish()
             stop.wait(15)
 
 
