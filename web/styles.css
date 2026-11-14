@@ -345,3 +345,9 @@ code.inline { font-family: var(--mono); font-size: .92em; background: var(--surf
   .pnl-row { grid-template-columns: 90px 1fr 84px; }
   .kv { grid-template-columns: 110px 1fr; }
 }
+
+/* ---------- stale-tab banner ---------- */
+.update-banner { position: fixed; z-index: 300; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center;
+  max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn);
+  color: var(--text); box-shadow: var(--shadow-2); font-size: var(--fs-sm); }
+.update-banner svg { color: var(--warn); flex: none; }

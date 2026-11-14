@@ -179,13 +179,29 @@ function startLive() {
   if (state.es) return;
   const es = new EventSource("/api/events/stream");
   state.es = es;
-  es.addEventListener("hello", () => setLive("live"));
+  es.addEventListener("hello", (m) => {
+    setLive("live");
+    // After a deploy the stream reconnects: if the server runs newer dashboard code, this tab is stale.
+    let b = null;
+    try { b = JSON.parse(m.data).build; } catch { /* ignore */ }
+    if (b && state.meta && state.meta.build && b !== state.meta.build) showUpdateBanner();
+  });
   es.addEventListener("trade", (m) => {
     let ev; try { ev = JSON.parse(m.data); } catch { return; }
     document.dispatchEvent(new CustomEvent("tp:event", { detail: ev }));
   });
   es.onerror = () => setLive(es.readyState === EventSource.CLOSED ? "down" : "connecting");
   es.onopen = () => setLive("live");
+}
+function showUpdateBanner() {
+  if ($("#updateBanner")) return;
+  const el = document.createElement("div");
+  el.id = "updateBanner";
+  el.setAttribute("role", "alert");
+  el.className = "update-banner";
+  el.innerHTML = `${icon("refresh", 16)}<span><b>TradePulse was updated.</b> Reload this page before saving anything.</span><button class="btn primary sm" id="updateReload">Reload now</button>`;
+  document.body.appendChild(el);
+  $("#updateReload").addEventListener("click", () => location.reload());
 }
 function stopLive() { if (state.es) { state.es.close(); state.es = null; } setLive("idle"); }
 function setLive(s) {

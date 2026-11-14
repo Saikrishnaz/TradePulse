@@ -115,11 +115,15 @@ class GroupIn(BaseModel):
     account_ids: list[str] = Field(default_factory=list, max_length=2000)
     channel_ids: list[int] = Field(default_factory=list, max_length=200)
     rules: dict[str, bool | None] = Field(default_factory=dict)
-    modes: list[str] = Field(default_factory=list, max_length=3)      # [] = follow the global setting
+    # [] = follow the global setting. None (field not sent) = keep what the group has: a client that does not
+    # know this field (an old dashboard tab) must never reset it. (Live: a stale tab wiped LIVE-only.)
+    modes: list[str] | None = Field(default=None, max_length=3)
 
     @field_validator("modes")
     @classmethod
     def _modes(cls, v):
+        if v is None:
+            return None
         v = sorted({str(m).upper() for m in v})
         bad = [m for m in v if m not in ("LIVE", "PAPER", "DRY_RUN")]
         if bad:
@@ -418,7 +422,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
 
         async def gen():
             try:
-                yield f"event: hello\ndata: {json.dumps({'at': ist_iso(), 'accounts': len(sc.account_ids)})}\n\n"
+                yield f"event: hello\ndata: {json.dumps({'at': ist_iso(), 'accounts': len(sc.account_ids), 'build': build_id()})}\n\n"
                 while True:
                     if await request.is_disconnected():
                         break
@@ -462,11 +466,15 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
         if bad_rules:
             raise HTTPException(400, f"Unknown event type(s): {', '.join(bad_rules)}")
         now = ist_iso()
+        modes = body.modes
+        if modes is None:                                  # not sent: keep the stored value (new group: global)
+            existing = rt.store.group(group_id) if group_id is not None else None
+            modes = (existing or {}).get("modes") or []
         try:
             with rt.store.tx() as c:
                 vals = (body.name.strip(), body.description, int(body.enabled), body.color, body.delivery_mode,
                         body.batch_minutes, body.digest_interval_min, json.dumps(body.digest_times),
-                        body.position_interval_min, int(body.eod_summary), int(body.allow_queries), json.dumps(body.modes))
+                        body.position_interval_min, int(body.eod_summary), int(body.allow_queries), json.dumps(modes))
                 if group_id is None:
                     group_id = c.execute("""INSERT INTO groups (name, description, enabled, color, delivery_mode,
                         batch_minutes, digest_interval_min, digest_times, position_interval_min, eod_summary,
@@ -1014,9 +1022,17 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
     def meta(u: dict = Depends(user)):
         return {"event_types": [{"type": et, "label": EVENT_LABELS[et]} for et in EVENT_TYPES],
                 "brokers": sorted({a["broker"] for a in rt.oms.accounts()}), "version": __version__,
-                "today": today_ist()}
+                "today": today_ist(), "build": build_id()}
 
     return app
+
+
+def build_id() -> str:
+    """Identifies the deployed dashboard code; an open tab compares it to detect that it is out of date."""
+    try:
+        return str(int(max((WEB_DIR / f).stat().st_mtime for f in ("app.js", "index.html", "styles.css"))))
+    except OSError:
+        return __version__
 
 
 # --- helpers ---------------------------------------------------------------------------------------

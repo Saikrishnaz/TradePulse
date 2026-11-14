@@ -179,6 +179,19 @@ def test_group_modes_api_validation(rt, client):
     assert client.post("/api/groups", json={**body, "name": "x", "modes": ["REAL"]}, headers=H).status_code == 422
 
 
+def test_save_without_modes_keeps_live_only(rt, client):
+    """Production bug: a dashboard tab opened before the update saved the group without 'modes' and wiped LIVE-only."""
+    from conftest import H, login
+    login(client, "admin", "admin123")
+    g = client.post("/api/groups", json={"name": "Live trades", "account_ids": ["J252505"], "modes": ["LIVE"]}, headers=H).json()
+    old_tab_body = {"name": "Live trades", "account_ids": ["J252505", "ZM4521"]}           # no 'modes' key at all
+    g2 = client.put(f"/api/groups/{g['id']}", json=old_tab_body, headers=H).json()
+    assert g2["modes"] == ["LIVE"] and g2["account_ids"] == ["J252505", "ZM4521"]
+    g3 = client.put(f"/api/groups/{g['id']}", json={**old_tab_body, "modes": []}, headers=H).json()
+    assert g3["modes"] == []                                                               # explicit [] still allowed
+    assert client.get("/api/meta").json()["build"]                                         # tabs can detect a new build
+
+
 def test_unacked_ingest_is_reclaimed(rt):
     rt.bus.ensure_group(busmod.INGEST, busmod.INGEST_GROUP)
     enqueue(rt.bus, ev.new_event(ev.ORDER_REJECTED, "TEST", "k1", account_id="ZM4521"))
