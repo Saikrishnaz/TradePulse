@@ -114,6 +114,10 @@ class Settings:
         # --- webhooks ---------------------------------------------------
         self.WEBHOOK_RATE_PER_MIN = int(overrides.get("WEBHOOK_RATE_PER_MIN", _int("TP_WEBHOOK_RATE_PER_MIN", 600)))
 
+        # --- next-day signals (POST /api/signals/next-day) -----------------
+        # The SAME Fernet key as SMX_PRESIG_KEY in the OMS .env: it decrypts the algo secrets the OMS publishes.
+        self.PRESIG_KEY = g("SMX_PRESIG_KEY", "")
+
         self.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 

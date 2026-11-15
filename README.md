@@ -22,7 +22,8 @@ answers commands in groups and private chats.
  │ smx:oms:events  ACCEPTED/STATUS/FILL/...  │──XREAD─▶ lifecycle, fills, workers, OMS book refreshes
  │ smx:oms:paper:pos:<acct>                  │──read──▶ paper books (no broker)
  │ LTP:<exch>:<seg>                          │──read──▶ live prices for unrealised P&L
- │ tradepulse:*   (the ONLY keys written)    │◀─write── ingest queue, live fan-out, slot, health
+ │ tradepulse:*   (TradePulse's own keys)    │◀─write── ingest queue, live fan-out, slot, health
+ │ smx:presig:*   (next-day signal store)    │◀─write── POST /api/signals/next-day (the one smx: prefix)
  └───────────────────────────────────────────┘
                                   │
             fills ──▶ BOOK = broker baseline (09:00 / 09:05 / refresh) ⊕ every fill since   (Decimal, idempotent)
@@ -56,6 +57,25 @@ answers commands in groups and private chats.
 
 Not visible through Redis (by design of the OMS): orders the OMS rejects *before* routing to a worker,
 and OMS-API-side alerts that are only written to its database.
+
+### Next-day signals (`POST /api/signals/next-day`)
+
+The OMS host is down overnight, so TradePulse also takes **signals for the next session** (from 15:30 until
+the OMS's 08:45 pickup) and stores them in Redis under `smx:presig:*` - the one place it writes outside
+`tradepulse:`, through `presignal/keys.own`, which refuses anything else. It still never trades: the OMS picks
+the signals up the next morning and places them (pre-market 09:00-09:07, handed to its normal flow at 09:15).
+
+* Same payload, headers, answers and store as the OMS's `/api/v1/signals/next-day`: the signal generator uses
+  **one** key and secret for both. The OMS publishes its algo keys to `smx:presig:algokeys` with each secret
+  encrypted under `SMX_PRESIG_KEY`; set the **same** value in both `.env` files. Nonces are shared, so the same
+  request sent to both servers is taken once.
+* Validated against what the OMS publishes (strategy templates, instrument master, intake calendar). The OMS
+  checks everything again at pickup, including what TradePulse cannot see (open positions).
+* `presignal/contract.py`, `store.py`, `keys.py` are byte-identical copies of the OMS's
+  `backend/oms/presignal/`; `tests/test_presignal.py` fails if they drift (set `SMX_OMS_REPO` if the OMS repo
+  is not at `../GITHUBS/SkyMatrix_Dashboard`). Change them in the OMS and copy them over unchanged.
+* Exempt from the dashboard's `X-TradePulse` header (machine to machine); rate-limited per IP like the broker
+  webhooks. Full description: the OMS's `docs/PREMARKET_SIGNALS.md`.
 
 ---
 

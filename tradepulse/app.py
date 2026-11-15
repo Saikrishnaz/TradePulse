@@ -226,7 +226,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
     async def security(request: Request, call_next):
         path = request.url.path
         if request.method in ("POST", "PUT", "DELETE", "PATCH") and path.startswith("/api/") \
-                and not path.startswith(("/api/webhooks/brokers/", "/api/telegram/webhook/")) \
+                and not path.startswith(("/api/webhooks/brokers/", "/api/telegram/webhook/", "/api/signals/")) \
                 and request.headers.get("x-tradepulse") != "1":
             return JSONResponse({"detail": "Missing X-TradePulse header"}, status_code=403)
         resp = await call_next(request)
@@ -756,6 +756,25 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
                 "phone_number_id": rt.vault.describe("whatsapp_phone_number_id"),
                 "template": rt.store.setting("whatsapp_template") or "",
                 "enabled": rt.store.setting("whatsapp_enabled")}
+
+    # --- next-day signals (stored in Redis for the OMS's morning pickup; nothing is traded here) -------
+    from fastapi.concurrency import run_in_threadpool
+
+    from .presignal.intake import Intake as PresignalIntake
+
+    def _presig_client():
+        return getattr(rt.bus, "r", None) if getattr(rt.bus, "kind", "") == "redis" else None
+
+    app.state.presignal = PresignalIntake(_presig_client, settings.PRESIG_KEY)
+
+    @app.post("/api/signals/next-day")
+    async def next_day_signal(request: Request):
+        ip = request.client.host if request.client else "?"
+        if not limiter.hit(f"presig:{ip}", settings.WEBHOOK_RATE_PER_MIN):
+            raise HTTPException(429, "rate limited")
+        raw = await request.body()
+        status, body = await run_in_threadpool(app.state.presignal.handle, raw, dict(request.headers), ip)
+        return JSONResponse(body, status_code=status)
 
     # --- broker webhooks ---------------------------------------------------------------------------------
     @app.api_route("/api/webhooks/brokers/{broker}", methods=["GET", "POST"])
