@@ -225,3 +225,9 @@ def login(client, username, password):
 
 # Instruments (exchange, token, symbol, class, lot, ref, product) - same as the simulator
 from oms_redis_sim import INSTRUMENTS  # noqa: E402,F401
+
+
+def every_step(rt):
+    """Old behaviour: notify every step of an order (the default is one final message per order)."""
+    rt.store.put_settings({"order_alerts": "every"})
+    rt.processor.invalidate()

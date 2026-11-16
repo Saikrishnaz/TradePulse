@@ -28,6 +28,22 @@ from dataclasses import dataclass, field
 
 from .events import DEFAULT_ENABLED
 
+# An order's steps before it ends. In "final" mode they are recorded and shown live, and summed up in the
+# one message sent when the order reaches a final state (FINAL_TYPES).
+INTERMEDIATE_TYPES = {"ORDER_PLACED", "ORDER_OPEN", "ORDER_MODIFIED", "ORDER_PARTIALLY_FILLED", "TRADE_EXECUTED",
+                      "POSITION_UPDATED", "HOLDING_UPDATED", "ACCOUNT_ALERT"}
+FINAL_TYPES = {"ORDER_FILLED", "ORDER_CANCELLED", "ORDER_REJECTED"}
+
+
+def final_only(snap_or_settings) -> bool:
+    settings = getattr(snap_or_settings, "settings", snap_or_settings) or {}
+    return str(settings.get("order_alerts") or "final") == "final"
+
+
+def held_for_final(snap, event: dict) -> bool:
+    """True when this event is one step of an order whose final message will report it."""
+    return (final_only(snap) and bool(event.get("internal_order_id")) and event.get("type") in INTERMEDIATE_TYPES)
+
 CHANNEL_KEYS = {"telegram": "CHANNEL_TELEGRAM", "whatsapp": "CHANNEL_WHATSAPP"}
 
 
@@ -71,6 +87,8 @@ def event_enabled(snap: RuleSnapshot, event_type: str, account_id: str, group_id
 def targets(snap: RuleSnapshot, event: dict) -> list[dict]:
     """Channels (with their group) that should receive this event. Empty list = store/show only."""
     account_id = event.get("account_id") or ""
+    if held_for_final(snap, event):
+        return []
     mon = snap.monitored.get(account_id)
     if not mon or not mon.get("enabled") or mon.get("muted"):
         return []

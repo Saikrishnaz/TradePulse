@@ -1113,7 +1113,13 @@ PAGES.notifications = async (root) => {
       <div class="card"><div class="card-h"><h2>Channels &amp; modes</h2></div><div class="card-b stack">
         <label class="switch"><input type="checkbox" id="tgOn" ${s.settings.telegram_enabled ? "checked" : ""} ${admin ? "" : "disabled"}><span class="track"></span><span>Telegram notifications</span></label>
         <label class="switch"><input type="checkbox" id="waOn" ${s.settings.whatsapp_enabled ? "checked" : ""} ${admin ? "" : "disabled"}><span class="track"></span><span>WhatsApp notifications (optional provider)</span></label>
-        <div class="row"><span class="label">Notify for trading modes:</span>${["LIVE", "PAPER", "DRY_RUN"].map((m) => `<label class="row" style="gap:6px"><input type="checkbox" class="check" data-mode="${m}" ${s.settings.notify_modes.includes(m) ? "checked" : ""} ${admin ? "" : "disabled"}> ${m}</label>`).join("")}</div></div></div>
+        <div class="row"><span class="label">Notify for trading modes:</span>${["LIVE", "PAPER", "DRY_RUN"].map((m) => `<label class="row" style="gap:6px"><input type="checkbox" class="check" data-mode="${m}" ${s.settings.notify_modes.includes(m) ? "checked" : ""} ${admin ? "" : "disabled"}> ${m}</label>`).join("")}</div>
+        <div class="field"><label for="ordAlerts">Order updates</label>
+          <select class="select" id="ordAlerts" ${admin ? "" : "disabled"}>
+            <option value="final" ${s.settings.order_alerts !== "every" ? "selected" : ""}>Final only – one message when the order is filled, cancelled or rejected</option>
+            <option value="every" ${s.settings.order_alerts === "every" ? "selected" : ""}>Every step – placed, each fill, modifications, alerts…</option>
+          </select>
+          <span class="hint">Every step is still recorded and shown under Live activity either way.</span></div></div></div>
       <div class="card"><div class="card-h"><h2>Why would it be sent?</h2></div><div class="card-b stack">
         <div class="row"><select class="select" id="exAcct" aria-label="Account">${accountOptions(accts, "", "Choose account")}</select>
           <select class="select" id="exType" aria-label="Event">${s.event_types.map((t) => `<option value="${t.type}">${esc(t.label)}</option>`).join("")}</select><button class="btn" id="exBtn">Explain</button></div><div id="exOut"></div></div></div></div>
@@ -1149,6 +1155,7 @@ PAGES.notifications = async (root) => {
     $("#tgOn").addEventListener("change", (e) => saveSetting({ telegram_enabled: e.target.checked }));
     $("#waOn").addEventListener("change", (e) => saveSetting({ whatsapp_enabled: e.target.checked }));
     $$("[data-mode]", root).forEach((c) => c.addEventListener("change", () => saveSetting({ notify_modes: $$("[data-mode]", root).filter((x) => x.checked).map((x) => x.dataset.mode) })));
+    $("#ordAlerts", root)?.addEventListener("change", (ev) => saveSetting({ order_alerts: ev.target.value }));
   }
   $("#exBtn").addEventListener("click", async () => {
     const a = $("#exAcct").value; if (!a) { toast("Choose an account", "error"); return; }

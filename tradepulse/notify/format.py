@@ -190,3 +190,86 @@ def split_text(text: str, limit: int = MAX_TEXT) -> list[str]:
     if cur:
         parts.append(cur)
     return parts
+
+
+FINAL_HEAD = {"ORDER_FILLED": ("✅", "Order filled"), "ORDER_CANCELLED": ("🚫", "Order cancelled"),
+              "ORDER_REJECTED": ("❌", "Order rejected")}
+
+
+def _secs(a: str, b: str) -> str:
+    try:
+        s = int((datetime.fromisoformat(str(b)) - datetime.fromisoformat(str(a))).total_seconds())
+    except (TypeError, ValueError):
+        return ""
+    return f"{s}s" if s < 120 else f"{s // 60}m {s % 60}s" if s < 3600 else f"{s // 3600}h {s % 3600 // 60}m"
+
+
+def order_final_text(store, event_id: str) -> str:
+    """The ONE message for an order ("final" mode): how it ended plus everything that happened on the way -
+    every execution, average price, modifications, worker alerts and the position it left."""
+    e = store.one("SELECT * FROM events WHERE event_id = ?", (event_id,))
+    if not e or not e.get("internal_order_id"):
+        return ""
+    o = store.one("SELECT * FROM orders WHERE internal_order_id = ?", (e["internal_order_id"],))
+    if not o:
+        return ""
+    fills = store.rows("SELECT quantity, price, filled_at FROM fills WHERE internal_order_id = ? ORDER BY filled_at, id",
+                       (o["internal_order_id"],))
+    alerts = store.rows("""SELECT message FROM events WHERE internal_order_id = ? AND type = 'ACCOUNT_ALERT'
+                           ORDER BY id""", (o["internal_order_id"],))
+    mods = max(int(o.get("modification_count") or 0),
+               (store.one("SELECT COUNT(*) AS n FROM events WHERE internal_order_id = ? AND type = 'ORDER_MODIFIED'",
+                          (o["internal_order_id"],)) or {}).get("n") or 0)
+    qty, filled = int(o["ordered_quantity"] or 0), int(o["filled_quantity"] or 0)
+    if fills:
+        filled = max(filled, sum(int(f["quantity"]) for f in fills))
+    avg = float(o["average_price"] or 0)
+    if fills and not avg:
+        avg = sum(float(f["price"]) * int(f["quantity"]) for f in fills) / max(1, sum(int(f["quantity"]) for f in fills))
+    icon, title = FINAL_HEAD.get(e["type"], ("•", e["type"].replace("_", " ").title()))
+    if e["type"] == "ORDER_CANCELLED" and filled:
+        icon, title = "◐", "Order cancelled · partly filled"
+    mode = (o.get("trading_mode") or e.get("trading_mode") or "").upper()
+    head = f"{icon} <b>{h(title)}</b> · {h(broker_name(o.get('broker') or e.get('broker')))}"
+    if mode and mode != "LIVE":
+        head += f" · 🧪 {h(mode)}"
+    sym = h(pretty_symbol(o["symbol"]))
+    lines = [head, f"<b>{h(e.get('client_name') or '–')}</b>  <code>{h(show_id(o['account_id']))}</code>", "",
+             f"{_side(o['side'], qty)} × <b>{sym}</b>",
+             f"Filled <b>{filled:,}/{qty:,}</b>" + (f" @ avg <b>{num(avg)}</b>" if filled and avg else "")
+             + f" · {h(' · '.join(x for x in (o.get('exchange'), o.get('order_type'), o.get('product')) if x))}"
+             + (f" · limit {num(o['price'])}" if o.get("price") else "")]
+    if fills:
+        prices = [float(f["price"]) for f in fills]
+        rng = num(min(prices)) if min(prices) == max(prices) else f"{num(min(prices))} – {num(max(prices))}"
+        lines.append(f"💹 {len(fills)} execution{'s' if len(fills) != 1 else ''} · {rng}")
+        if len(fills) > 1:
+            body = "\n".join(f"{h(str(f['filled_at'])[11:19])}  {int(f['quantity']):,} @ {num(f['price'])}" for f in fills[:40])
+            if len(fills) > 40:
+                body += f"\n… {len(fills) - 40} more"
+            lines.append(f"<blockquote expandable>{body}</blockquote>")
+    extra = []
+    if mods:
+        extra.append(f"✏️ modified {mods}×")
+    if alerts:
+        extra.append(f"⚠️ {len(alerts)} alert{'s' if len(alerts) != 1 else ''}")
+    if extra:
+        lines.append(" · ".join(extra))
+    if e["type"] in ("ORDER_REJECTED", "ORDER_CANCELLED") and (o.get("status_message") or e.get("message")):
+        lines.append(f"<blockquote>{h((o.get('status_message') or e.get('message'))[:300])}</blockquote>")
+    seen = {(o.get("status_message") or "").strip()}
+    notes = [a["message"] for a in alerts if a["message"] and a["message"].strip() not in seen]
+    if notes:
+        lines.append("<blockquote>" + "\n".join(f"⚠️ {h(m[:200])}" for m in notes[:5]) + "</blockquote>")
+    pos = store.one("""SELECT net_quantity FROM book_positions WHERE account_id = ? AND exchange = ? AND exchange_token = ?
+                       AND product = ?""", (o["account_id"], o.get("exchange") or "", int(o.get("exchange_token") or 0),
+                                             o.get("product") or "")) if filled else None
+    if pos is not None:
+        n = int(pos["net_quantity"])
+        lines.append(f"📊 Position now: <b>{'LONG ' + format(n, ',') if n > 0 else 'SHORT ' + format(-n, ',') if n < 0 else 'flat'}</b>")
+    took = _secs(o.get("created_at"), e.get("occurred_at"))
+    foot = f"{h(hhmmss(o.get('created_at')))[:8]} → {h(hhmmss(e.get('occurred_at')))}" + (f" ({took})" if took else "")
+    if o.get("broker_order_id"):
+        foot += f" · order <code>{h(o['broker_order_id'])}</code>"
+    lines += ["", f"<i>{foot}</i>"]
+    return "\n".join(lines)[:MAX_TEXT]

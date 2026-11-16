@@ -548,7 +548,7 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
             "groups": {str(g["id"]): g["rules"] for g in rt.store.groups()},
             "count": len(rules),
             "precedence": ["account", "client", "group", "global", "default"],
-            "settings": {k: rt.store.setting(k) for k in ("telegram_enabled", "whatsapp_enabled", "notify_modes")},
+            "settings": {k: rt.store.setting(k) for k in ("telegram_enabled", "whatsapp_enabled", "notify_modes", "order_alerts")},
         }
 
     @app.put("/api/notifications/settings")
@@ -867,6 +867,9 @@ def create_app(settings=None, runtime: Runtime | None = None, start_workers: boo
             elif k == "notify_modes":
                 if not isinstance(v, list) or any(m not in ("LIVE", "PAPER", "DRY_RUN") for m in v):
                     raise HTTPException(400, "notify_modes must be a list of LIVE / PAPER / DRY_RUN")
+            elif k == "order_alerts":
+                if v not in ("final", "every"):
+                    raise HTTPException(400, "order_alerts must be 'final' or 'every'")
             elif k == "trading_days":
                 if not isinstance(v, list) or any(not isinstance(d, int) or not 0 <= d <= 6 for d in v):
                     raise HTTPException(400, "trading_days must be weekday numbers 0-6")

@@ -1,6 +1,6 @@
 """Interactive Telegram UI: screens, button navigation (edit in place), scope re-checks, refresh pop-ups, alert buttons."""
 
-from conftest import INSTRUMENTS, pump, setup_group, start_live
+from conftest import every_step, INSTRUMENTS, pump, setup_group, start_live
 from tradepulse import tgui
 from tradepulse.bot import create_link_code
 
@@ -170,6 +170,7 @@ def test_private_desk_shows_every_mode_with_a_tag(rt, tg):
 
 
 def test_alert_cards_carry_buttons(rt, tg):
+    every_step(rt)                                                            # this test is about each step
     start_live(rt)
     setup_group(rt, ["J252505"])
     rt.sim.order("J252505", outcome="reject")

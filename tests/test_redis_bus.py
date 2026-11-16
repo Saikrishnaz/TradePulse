@@ -5,7 +5,7 @@ import json
 import fakeredis
 import pytest
 
-from conftest import INSTRUMENTS, make_settings, pump, seed_users, setup_group, start_live
+from conftest import every_step, INSTRUMENTS, make_settings, pump, seed_users, setup_group, start_live
 from oms_redis_sim import OmsSim
 from tradepulse import bus as busmod
 from tradepulse.bus import RedisBus
@@ -76,6 +76,7 @@ def test_full_pipeline_on_redis_with_live_price(tmp_path, tg):
     rbus = RedisBus(raw)
     rt = Runtime(make_settings(tmp_path), bus=rbus, telegram_client=tg)
     seed_users(rt.store)
+    every_step(rt)                                   # this test is about each step
     rt.sim = OmsSim(raw).seed()                      # the 'OMS' writes with its own client, like production
     rt.tail.sync_roster()
     start_live(rt)

@@ -411,7 +411,8 @@ DEFAULT_SETTINGS = {
     "broker_slot_seconds": 3,              # ONE broker request (positions or holdings) per this many seconds, all accounts
     "track_positions": True,               # emit POSITION_UPDATED from OMS trade legs
     "track_alerts": True,                  # emit ACCOUNT_ALERT from OMS alerts
-    "notify_modes": ["LIVE", "PAPER"],     # trading modes that trigger notifications (DRY_RUN is noisy)
+    "notify_modes": ["LIVE", "PAPER"],
+    "order_alerts": "final",               # final = one message when an order ends; every = every step     # trading modes that trigger notifications (DRY_RUN is noisy)
     "market_open": "09:15",
     "market_close": "15:30",
     "trading_days": [0, 1, 2, 3, 4],       # Mon..Fri

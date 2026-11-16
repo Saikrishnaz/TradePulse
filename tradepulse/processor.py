@@ -19,7 +19,9 @@ from datetime import datetime, timedelta
 from . import bus as busmod
 from .config import IST, ist_iso, now_ist
 from .notify.format import event_text
-from .rules import RuleSnapshot, targets
+from .rules import FINAL_TYPES, RuleSnapshot, final_only, targets
+
+FINAL_SETTLE_SECONDS = 3            # wait for fills reported right after the final status
 
 log = logging.getLogger("tradepulse.processor")
 
@@ -126,13 +128,18 @@ class Processor:
                 self.stats["duplicates"] += 1
                 return False
             text = event_text(e) if tgts else ""
+            # One message per order: the final state is summarised when it is sent, a few seconds later, so
+            # fills reported just after the status change are included.
+            final = bool(tgts) and final_only(snap) and e.get("type") in FINAL_TYPES and bool(e.get("internal_order_id"))
+            kind = "order_final" if final else "event"
             for t in tgts:
                 g = t["group"]
                 batched = g.get("delivery_mode") == "batched"
-                due = next_batch_boundary(int(g.get("batch_minutes") or 5)) if batched else now
+                due = next_batch_boundary(int(g.get("batch_minutes") or 5)) if batched else (
+                    ist_iso(now_ist() + timedelta(seconds=FINAL_SETTLE_SECONDS)) if final else now)
                 c.execute("""INSERT OR IGNORE INTO notifications (event_id, kind, channel_id, group_id, text, status,
-                                 batched, next_attempt_at, created_at) VALUES (?, 'event', ?, ?, ?, 'QUEUED', ?, ?, ?)""",
-                          (e["event_id"], t["channel"]["id"], g["id"], text, int(batched), due, now))
+                                 batched, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)""",
+                          (e["event_id"], kind, t["channel"]["id"], g["id"], text, int(batched), due, now))
         self.stats["processed"] += 1
         self.stats["last_at"] = now
         try:

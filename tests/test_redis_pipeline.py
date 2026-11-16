@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import INSTRUMENTS, pump, setup_group, start_live
+from conftest import every_step, INSTRUMENTS, pump, setup_group, start_live
 from tradepulse import bus as busmod
 from tradepulse import events as ev
 from tradepulse.processor import enqueue
@@ -133,6 +133,7 @@ def test_webhook_and_stream_same_fill_one_notification(rt):
 
 
 def test_first_start_history_is_backfill_not_notified(rt):
+    every_step(rt)                                                            # this test is about each step
     setup_group(rt, ["BR77104"])
     rt.sim.order("BR77104", outcome="reject")                           # happened before TradePulse started
     start_live(rt)
@@ -154,6 +155,7 @@ def test_only_monitored_accounts_in_groups_notify(rt):
 
 def test_live_only_group_never_gets_paper_trades(rt):
     """The user's 'live trade' group received PAPER trades: a group can now be LIVE only."""
+    every_step(rt)                                                            # this test is about each step
     import json as _json
     start_live(rt)
     gid, _ = setup_group(rt, ["J252505"])
@@ -172,6 +174,7 @@ def test_live_only_group_never_gets_paper_trades(rt):
 
 def test_worker_alert_inherits_the_orders_mode_and_details(rt):
     """Production: a PAPER order's 're-price attempts' worker alert reached the LIVE-only group (no mode on the alert)."""
+    every_step(rt)                                                            # this test is about each step
     import json as _json
     from tradepulse.notify.format import event_text
     start_live(rt)

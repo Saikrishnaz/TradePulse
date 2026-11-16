@@ -62,6 +62,17 @@ class Notifier:
         if not settings.get(f"{ch['provider']}_enabled", ch["provider"] == "telegram"):
             self._mark(ids, "SKIPPED", error=f"{ch['provider']} disabled globally")
             return 0
+        for r in rows:
+            if r.get("kind") == "order_final":
+                from .format import order_final_text
+                try:
+                    txt = order_final_text(self.store, r["event_id"])
+                except Exception:
+                    log.exception("final order summary failed; sending the plain card")
+                    txt = ""
+                if txt:
+                    r["text"] = txt
+                    self.store.execute("UPDATE notifications SET text = ? WHERE id = ?", (txt, r["id"]))
         texts = batch_text([r["text"] for r in rows]) if len(rows) > 1 else split_text(rows[0]["text"])
         try:
             ref = ""

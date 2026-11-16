@@ -1,6 +1,6 @@
 """Outbox delivery: success, backoff, Telegram 429, permanent failures, batching, disabled channels."""
 
-from conftest import pump, setup_group, start_live
+from conftest import every_step, pump, setup_group, start_live
 
 from tradepulse.notify.outbox import queue_message
 from tradepulse.notify.telegram import TelegramError
@@ -11,6 +11,7 @@ def statuses(rt):
 
 
 def test_event_notification_is_sent_with_client_id(rt, tg):
+    every_step(rt)                                                            # this test is about each step
     start_live(rt)
     setup_group(rt, ["J252505"], chat_id="-1001")
     rt.sim.order("J252505", outcome="reject")
@@ -68,6 +69,7 @@ def test_max_attempts_goes_dead(rt, tg):
 
 
 def test_batched_rows_go_out_as_one_message(rt, tg):
+    every_step(rt)                                                            # this test is about each step
     start_live(rt)
     setup_group(rt, ["ZM4521"], delivery_mode="batched", batch_minutes=5)
     rt.sim.order("ZM4521", outcome="reject")
