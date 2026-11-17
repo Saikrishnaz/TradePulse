@@ -84,6 +84,20 @@ def event_enabled(snap: RuleSnapshot, event_type: str, account_id: str, group_id
     return resolve_flag(snap, event_type, account_id, group_id, DEFAULT_ENABLED.get(event_type, False))
 
 
+FILL_TYPES = ("TRADE_EXECUTED", "ORDER_PARTIALLY_FILLED")
+
+
+def wants_fills_via_final(snap: RuleSnapshot, event: dict, account_id: str, group_id: int | None) -> bool:
+    """In "final" mode the per-fill messages are folded into the order's final message. A group that asked
+    for fills (Trade executed / Partially filled on) but not "Order filled" must still get that final
+    message - otherwise it receives nothing for a filled order (production, 17 Nov: 50 fills, 0 messages)."""
+    if not final_only(snap) or not event.get("internal_order_id"):
+        return False
+    et = event.get("type")
+    filled = et == "ORDER_FILLED" or (et == "ORDER_CANCELLED" and int(event.get("filled_quantity") or 0) > 0)
+    return filled and any(event_enabled(snap, t, account_id, group_id)[0] for t in FILL_TYPES)
+
+
 def targets(snap: RuleSnapshot, event: dict) -> list[dict]:
     """Channels (with their group) that should receive this event. Empty list = store/show only."""
     account_id = event.get("account_id") or ""
@@ -104,6 +118,8 @@ def targets(snap: RuleSnapshot, event: dict) -> list[dict]:
         if mode and mode not in modes:
             continue
         ok, _lvl = event_enabled(snap, event["type"], account_id, g["id"])
+        if not ok and wants_fills_via_final(snap, event, account_id, g["id"]):
+            ok = True
         if not ok:
             continue
         for ch in g["channels"]:

@@ -89,3 +89,29 @@ def test_setting_validated(rt, client):
     assert client.put("/api/settings", json={"order_alerts": "every"}, headers=H).status_code == 200
     assert client.put("/api/settings", json={"order_alerts": "sometimes"}, headers=H).status_code == 400
     assert client.get("/api/notifications/settings", headers=H).json()["settings"]["order_alerts"] == "every"
+
+
+def test_group_with_trades_on_and_order_filled_off_still_gets_fills(rt, tg):
+    """Production (17 Nov): both groups had Order filled OFF and Trade executed ON. 'Final only' held the trades
+    and the final 'Order filled' was off -> 50 orders filled, 0 messages; only rejections arrived."""
+    start_live(rt)
+    gid, _ = setup_group(rt, ["ZM4521"])
+    rt.store.set_rules("group", str(gid), {"ORDER_FILLED": False, "TRADE_EXECUTED": True, "ORDER_REJECTED": True,
+                                           "ORDER_PLACED": False, "ORDER_PARTIALLY_FILLED": False})
+    rt.processor.invalidate()
+    fill_in_pieces(rt, "ZM4521", [(75, 125.10), (75, 125.20)])
+    pump(rt)
+    types = [r["type"] for r in notifs(rt)]
+    assert types.count("ORDER_FILLED") == 1 and "TRADE_EXECUTED" not in types
+    deliver_now(rt)
+    assert any("✅ <b>Order filled</b>" in s["text"] and "2 executions" in s["text"] for s in tg.sent)
+
+
+def test_trades_off_and_filled_off_means_no_fill_message(rt, tg):
+    start_live(rt)
+    gid, _ = setup_group(rt, ["ZM4521"])
+    rt.store.set_rules("group", str(gid), {"ORDER_FILLED": False, "TRADE_EXECUTED": False, "ORDER_PARTIALLY_FILLED": False})
+    rt.processor.invalidate()
+    fill_in_pieces(rt, "ZM4521", [(75, 125.10)])
+    pump(rt)
+    assert "ORDER_FILLED" not in [r["type"] for r in notifs(rt)]

@@ -1119,7 +1119,7 @@ PAGES.notifications = async (root) => {
             <option value="final" ${s.settings.order_alerts !== "every" ? "selected" : ""}>Final only – one message when the order is filled, cancelled or rejected</option>
             <option value="every" ${s.settings.order_alerts === "every" ? "selected" : ""}>Every step – placed, each fill, modifications, alerts…</option>
           </select>
-          <span class="hint">Every step is still recorded and shown under Live activity either way.</span></div></div></div>
+          <span class="hint">Every step is still recorded and shown under Live activity either way. In <b>Final only</b>, a group with <b>Trade executed</b> or <b>Partially filled</b> on gets the final message for filled orders, with every execution in it.</span></div></div></div>
       <div class="card"><div class="card-h"><h2>Why would it be sent?</h2></div><div class="card-b stack">
         <div class="row"><select class="select" id="exAcct" aria-label="Account">${accountOptions(accts, "", "Choose account")}</select>
           <select class="select" id="exType" aria-label="Event">${s.event_types.map((t) => `<option value="${t.type}">${esc(t.label)}</option>`).join("")}</select><button class="btn" id="exBtn">Explain</button></div><div id="exOut"></div></div></div></div>
